@@ -1,0 +1,75 @@
+[2026-01-15 21:28:11] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:11] auth ok
+[2026-01-15 21:28:11] DB pdo=db()
+[2026-01-15 21:28:11] DB ok
+[2026-01-15 21:28:11] RAW len=49
+[2026-01-15 21:28:11] REQ action=ensure_thread store_id=1 thread_id=0
+[2026-01-15 21:28:11] ensure_thread ok thread_id=1
+[2026-01-15 21:28:11] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:11] auth ok
+[2026-01-15 21:28:11] DB pdo=db()
+[2026-01-15 21:28:11] DB ok
+[2026-01-15 21:28:11] RAW len=68
+[2026-01-15 21:28:11] REQ action=history store_id=1 thread_id=1
+[2026-01-15 21:28:21] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:21] auth ok
+[2026-01-15 21:28:21] DB pdo=db()
+[2026-01-15 21:28:21] DB ok
+[2026-01-15 21:28:21] RAW len=49
+[2026-01-15 21:28:21] REQ action=ensure_thread store_id=1 thread_id=0
+[2026-01-15 21:28:21] ensure_thread ok thread_id=1
+[2026-01-15 21:28:21] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:21] auth ok
+[2026-01-15 21:28:21] DB pdo=db()
+[2026-01-15 21:28:21] DB ok
+[2026-01-15 21:28:21] RAW len=223
+[2026-01-15 21:28:21] REQ action=send store_id=1 thread_id=1
+[2026-01-15 21:28:22] saved staff msg_id=440
+[2026-01-15 21:28:22] AI begin: require help_ai_core.php
+[2026-01-15 21:28:22] AI begin: call help_ai_answer_from_kb
+[2026-01-15 21:28:22] AI done: kb_hits=0 used_openai=0 answer_len=268
+[2026-01-15 21:28:22] saved ai msg_id=441
+[2026-01-15 21:28:22] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:22] auth ok
+[2026-01-15 21:28:22] DB pdo=db()
+[2026-01-15 21:28:22] DB ok
+[2026-01-15 21:28:22] RAW len=49
+[2026-01-15 21:28:22] REQ action=ensure_thread store_id=1 thread_id=0
+[2026-01-15 21:28:22] ensure_thread ok thread_id=1
+[2026-01-15 21:28:22] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:22] auth ok
+[2026-01-15 21:28:22] DB pdo=db()
+[2026-01-15 21:28:22] DB ok
+[2026-01-15 21:28:22] RAW len=68
+[2026-01-15 21:28:22] REQ action=history store_id=1 thread_id=1
+[2026-01-15 21:28:39] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:39] auth ok
+[2026-01-15 21:28:39] DB pdo=db()
+[2026-01-15 21:28:39] DB ok
+[2026-01-15 21:28:39] RAW len=49
+[2026-01-15 21:28:39] REQ action=ensure_thread store_id=1 thread_id=0
+[2026-01-15 21:28:39] ensure_thread ok thread_id=1
+[2026-01-15 21:28:39] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:39] auth ok
+[2026-01-15 21:28:39] DB pdo=db()
+[2026-01-15 21:28:39] DB ok
+[2026-01-15 21:28:39] RAW len=156
+[2026-01-15 21:28:39] REQ action=send store_id=1 thread_id=1
+[2026-01-15 21:28:39] saved staff msg_id=442
+[2026-01-15 21:28:39] AI begin: require help_ai_core.php
+[2026-01-15 21:28:39] AI begin: call help_ai_answer_from_kb
+[2026-01-15 21:28:39] AI done: kb_hits=0 used_openai=0 answer_len=268
+[2026-01-15 21:28:39] saved ai msg_id=443
+[2026-01-15 21:28:39] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:39] auth ok
+[2026-01-15 21:28:39] DB pdo=db()
+[2026-01-15 21:28:39] DB ok
+[2026-01-15 21:28:39] RAW len=49
+[2026-01-15 21:28:39] REQ action=ensure_thread store_id=1 thread_id=0
+[2026-01-15 21:28:39] ensure_thread ok thread_id=1
+[2026-01-15 21:28:39] BOOT method=POST uri=/admin/help_api.php ct=application/json
+[2026-01-15 21:28:39] auth ok
+[2026-01-15 21:28:39] DB pdo=db()
+[2026-01-15 21:28:39] DB ok
+[2026-01-15 21:28:39] RAW len=68
+[2026-01-15 21:28:39] REQ action=history store_id=1 thread_id=1

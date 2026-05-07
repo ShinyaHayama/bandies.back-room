@@ -1,0 +1,4 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^c/([A-Za-z0-9]{8,16})/?$ calendar.php?code=$1 [L,QSA]
+</IfModule>

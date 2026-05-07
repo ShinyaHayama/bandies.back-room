@@ -1,0 +1,165 @@
+作業員の時給に変更があった場合は employee_wage_histories に時給情報を保持します。
+元々はemployeesテーブルのhourly_wage_yenを見ていましたが、これでは時給が変わったときに過去の給料も変わってしまいます。
+この対応をこれからしていきます。
+
+43 件の結果 - 9 ファイル
+
+admin/employee_edit.php:
+    14   * - ✅ 時給を変更したとき、過去計算が変わらないように「営業日基準の時給履歴」を保存できるようにする（今回追加）
+    15:  *   - employee_wage_histories(effective_business_day, hourly_wage_yen) にUPSERT
+    16   *   - ※給与計算側がこの履歴を参照する改修も別途必要（このファイルでは計算ロジックは触れない）
+
+   303        display_name,
+   304:       hourly_wage_yen, nomination_fee_yen, age,
+   305        phone, email, sns,
+
+   351          [
+   352:             'hourly_wage_yen',
+   353              'age',
+
+   387      } else {
+   388:         $wageRaw = trim((string)($_POST['hourly_wage_yen'] ?? ''));
+   389          $wageInt = toIntOrNullDigits($wageRaw);
+
+   446          // ✅ 追加：時給が「変更された」か判定（履歴に書くかどうか）
+   447:         $dbWage = $empDb['hourly_wage_yen'];
+   448          $dbWageInt = ($dbWage === null ? null : (int)$dbWage);
+
+   485                  // なぜ必要か：
+   486:                 // - employees.hourly_wage_yen を参照して計算すると過去が全部変わるため
+   487                  // - 営業日（cutoff）キーに対して「その日の時給」を確定して残すため
+
+   490                          INSERT INTO employee_wage_histories
+   491:                           (tenant_id, store_id, employee_id, effective_business_day, hourly_wage_yen, created_at, updated_at)
+   492                          VALUES (:t,:s,:e,:d,:w,NOW(),NOW())
+   493                          ON DUPLICATE KEY UPDATE
+   494:                           hourly_wage_yen = VALUES(hourly_wage_yen),
+   495                            updated_at = NOW()
+
+   508                      UPDATE employees SET
+   509:                       hourly_wage_yen=:w,
+   510                        age=:age,
+
+   597                        display_name,
+   598:                       hourly_wage_yen, nomination_fee_yen, age,
+   599                        phone, email, sns,
+
+   979                      <div class="sValue mono">
+   980:                         <?= h(yen($empDb['hourly_wage_yen'] !== null ? (int)$empDb['hourly_wage_yen'] : null)) ?></div>
+   981                      <div class="hint">※この値だけで計算すると、過去分も全部変わります（履歴参照が必要）</div>
+
+  1090                                  <div>
+  1091:                                     <input type="text" name="hourly_wage_yen" inputmode="numeric" pattern="\d*"
+  1092:                                         value="<?= h((string)($empForm['hourly_wage_yen'] ?? '')) ?>"
+  1093                                          oninput="this.value=this.value.replace(/[^\d]/g,'')">
+
+admin/employees_new.php:
+   306          SELECT
+   307:             e.id, e.display_name, e.hourly_wage_yen, e.employment_status, e.sort_order,
+   308              e.auth_pin_set_at, e.auth_pin_code,
+
+   457                  $displayName = trim((string)($_POST['display_name'] ?? ''));
+   458:                 $wageRaw = trim((string)($_POST['hourly_wage_yen'] ?? ''));
+   459                  $hourlyWage = null;
+
+   479                              INSERT INTO employees (
+   480:                                 tenant_id, store_id, display_name, hourly_wage_yen,
+   481                                  employment_status, sort_order,
+
+   485                              VALUES (
+   486:                                 :tenant_id, :store_id, :display_name, :hourly_wage_yen,
+   487                                  :employment_status, :sort_order,
+
+   494                          $stmt->bindValue(':display_name', $displayName, PDO::PARAM_STR);
+   495:                         if ($hourlyWage === null) $stmt->bindValue(':hourly_wage_yen', null, PDO::PARAM_NULL);
+   496:                         else $stmt->bindValue(':hourly_wage_yen', $hourlyWage, PDO::PARAM_INT);
+   497                          $stmt->bindValue(':employment_status', $status, PDO::PARAM_STR);
+
+  1177  
+  1178:                                         $wage = isset($e['hourly_wage_yen']) ? (int)$e['hourly_wage_yen'] : 0;
+  1179                                          $pinCode = (string)($e['auth_pin_code'] ?? '');
+
+  1296                                      <div class="label">時給（円）</div>
+  1297:                                     <input class="input inputShort" type="number" name="hourly_wage_yen"
+  1298                                          placeholder="例：1200" min="0" step="1">
+
+admin/payroll_run.php:
+  320      // 従業員の時給・税区分
+  321:     $emp = $pdo->prepare("SELECT id, hourly_wage_yen, tax_type FROM employees WHERE tenant_id=:tid AND store_id=:sid AND id=:eid LIMIT 1");
+  322      $emp->execute([':tid' => $tenantId, ':sid' => $storeId, ':eid' => $employeeId]);
+
+  326      }
+  327:     $hourly = (int)($e['hourly_wage_yen'] ?? 0);
+  328      $taxType = (string)($e['tax_type'] ?? 'ko');
+
+admin/payslip_pdf.php:
+  567            display_name,
+  568:           hourly_wage_yen,
+  569            COALESCE(tax_type,'ko') AS tax_type,
+
+  578  
+  579:     $hourlyWage = (int)($emp['hourly_wage_yen'] ?? 0);
+  580      $taxType = (string)($emp['tax_type'] ?? 'ko');
+
+  802  
+  803:             'hourly_wage_yen' => $hourlyWage,
+  804              'base_pay_yen'    => $dayBasePay,
+
+  864  
+  865:         'hourly_wage_yen' => $hourlyWage,
+  866          'base_pay_yen'    => $basePayYen,
+
+admin/payslip_simple_pdf.php:
+  653            display_name,
+  654:           hourly_wage_yen,
+  655            COALESCE(tax_type,'ko') AS tax_type,
+
+  667  
+  668:     $hourlyWage = (int)($emp['hourly_wage_yen'] ?? 0);
+  669      $taxType = (string)($emp['tax_type'] ?? 'ko');
+
+admin/payslip_simple_view.php:
+  69  
+  70: $hourly = (int)($ctx['hourly_wage_yen'] ?? 0);
+  71  
+
+admin/payslip_view.php:
+  53  
+  54: $hourly = (int)($ctx['hourly_wage_yen'] ?? 0);
+  55  
+
+admin/time_punch_daily.php:
+   11   *   - キーは effective_business_day（= 営業日 cutoff 済みの日付キー）
+   12:  *   - 履歴が無い日は従来通り employees.hourly_wage_yen（現在の設定時給）にフォールバック（既存を壊さない）
+   13   *
+
+  664  $empStmt = $pdo->prepare("
+  665:   SELECT id, display_name, sort_order, hourly_wage_yen {$extraSql}
+  666    FROM employees
+
+  721  $wageMap = [];
+  722: foreach ($employeesAll as $e) $wageMap[(int)$e['id']] = (int)($e['hourly_wage_yen'] ?? 0);
+  723  
+
+  741          $whStmt = $pdo->prepare("
+  742:             SELECT employee_id, effective_business_day, hourly_wage_yen
+  743              FROM employee_wage_histories
+
+  754              if ($eid <= 0 || $day === '') continue;
+  755:             $wageHistoryMap[$eid . '|' . $day] = (int)($r['hourly_wage_yen'] ?? 0);
+  756          }
+
+api/lib/labor_mvp.php:
+    9   * - 売上（日別）: daily_store_reports.business_date / sales_yen
+   10:  * - 人件費（日別）: time_punches + employees.hourly_wage_yen + daily_wage_adjustments(bonus_yen)
+   11   *
+
+  110      $st = $pdo->prepare("
+  111:         SELECT id, COALESCE(hourly_wage_yen,0) AS hourly_wage_yen
+  112          FROM employees
+
+  118      while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+  119:         $map[(int)$r['id']] = (int)$r['hourly_wage_yen'];
+
+現在はこれだけのファイルが古い時給情報を見ています。
+1ファイルずつ渡すのでemployee_wage_historiesを見に行く形に直してください。
