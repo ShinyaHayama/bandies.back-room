@@ -167,15 +167,8 @@ try {
     $hasSalesVisitors = !($salesYenRaw === null || $visitorsRaw === null);
 
     // DB
-    $pdo = new PDO(
-        'mysql:host=mysql80-3.lolipop.lan;dbname=LAA1686629-azure;charset=utf8mb4',
-        'LAA1686629',
-        'ftpaiwebf0918',
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    require_once __DIR__ . '/../lib/db.php';
+    $pdo = db();
 
     // timezone
     $tzStmt = $pdo->prepare("SELECT timezone FROM tenants WHERE id = :id");

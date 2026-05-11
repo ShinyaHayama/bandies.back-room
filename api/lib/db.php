@@ -8,9 +8,17 @@ function db(): PDO
     if ($pdo) return $pdo;
 
     $host = 'mysql80-3.lolipop.lan';
-    $httpHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
-    $httpHost = preg_replace('/:\d+$/', '', $httpHost) ?: $httpHost;
-    $db   = ($httpHost === 'dev.shimenavi.com') ? 'LAA1686629-devshimenav' : 'LAA1686629-azure';
+    $requestHosts = [
+        (string)($_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''),
+        (string)($_SERVER['HTTP_HOST'] ?? ''),
+        (string)($_SERVER['SERVER_NAME'] ?? ''),
+    ];
+    $requestHosts = array_map(static function (string $v): string {
+        $v = strtolower(trim(explode(',', $v)[0] ?? $v));
+        return preg_replace('/:\d+$/', '', $v) ?: $v;
+    }, $requestHosts);
+    $isDevHost = in_array('dev.shimenavi.com', $requestHosts, true);
+    $db   = $isDevHost ? 'LAA1686629-devshimenav' : 'LAA1686629-azure';
     $user = 'LAA1686629';
     $pass = 'ftpaiwebf0918';
 

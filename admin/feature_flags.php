@@ -7,16 +7,9 @@ declare(strict_types=1);
 $tenantId = (int)($_GET['tenant_id'] ?? 1);
 $featureKey = 'slot_wage_bonus';
 
-// DB接続（punch.phpと同じ）
-$pdo = new PDO(
-    'mysql:host=mysql80-3.lolipop.lan;dbname=LAA1686629-azure;charset=utf8mb4',
-    'LAA1686629',
-    'ftpaiwebf0918',
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]
-);
+// DB接続
+require_once __DIR__ . '/../api/lib/db.php';
+$pdo = db();
 
 // 現在値取得
 $stmt = $pdo->prepare("SELECT enabled FROM tenant_feature_flags WHERE tenant_id=:tid AND feature_key=:fk LIMIT 1");

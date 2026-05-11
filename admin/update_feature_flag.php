@@ -33,16 +33,9 @@ try {
         json_exit(400, ['ok' => false, 'error' => 'invalid_params']);
     }
 
-    // DB接続（punch.phpと同じ）
-    $pdo = new PDO(
-        'mysql:host=mysql80-3.lolipop.lan;dbname=LAA1686629-azure;charset=utf8mb4',
-        'LAA1686629',
-        'ftpaiwebf0918',
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
+    // DB接続
+    require_once __DIR__ . '/../api/lib/db.php';
+    $pdo = db();
 
     // UPSERT
     $stmt = $pdo->prepare("
