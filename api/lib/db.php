@@ -8,7 +8,9 @@ function db(): PDO
     if ($pdo) return $pdo;
 
     $host = 'mysql80-3.lolipop.lan';
-    $db   = 'LAA1686629-azure';
+    $httpHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $httpHost = preg_replace('/:\d+$/', '', $httpHost) ?: $httpHost;
+    $db   = ($httpHost === 'dev.shimenavi.com') ? 'LAA1686629-devshimenav' : 'LAA1686629-azure';
     $user = 'LAA1686629';
     $pass = 'ftpaiwebf0918';
 
