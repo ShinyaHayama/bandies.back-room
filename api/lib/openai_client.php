@@ -16,6 +16,20 @@ function openai_responses(string $model, string $inputText, int $timeoutSec = 25
         throw new RuntimeException('OPENAI_API_KEY is not set');
     }
 
+    $rootDir = dirname(__DIR__, 2);
+    $instructionParts = [];
+    foreach (['instructions.md', 'CODING_RULES.md'] as $instructionFile) {
+        $path = $rootDir . '/' . $instructionFile;
+        if (!is_file($path)) continue;
+
+        $content = trim((string)file_get_contents($path));
+        if ($content !== '') {
+            $instructionParts[] = $content;
+        }
+    }
+    if ($instructionParts) {
+        $inputText = implode("\n\n---\n\n", $instructionParts) . "\n\n---\n\n" . $inputText;
+    }
 
     $payload = [
         'model' => $model,
