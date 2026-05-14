@@ -2287,6 +2287,32 @@ $quickAddTimeOptions = buildTimeOptions(5);
             font-size: 13px;
         }
 
+        body.adminHomeDark .tpDaily tbody td,
+        body.adminHomeDark .tpDaily .timeCell,
+        body.adminHomeDark .tpDaily .punchTimeCell,
+        body.adminHomeDark .tpDaily .timeWithSourceLabel {
+            color: var(--theme-text) !important;
+        }
+
+        body.adminHomeDark .tpDaily .wk,
+        body.adminHomeDark .tpDaily .dateLine,
+        body.adminHomeDark .tpDaily .dateLine>span:first-child {
+            color: var(--theme-text) !important;
+        }
+
+        body.adminHomeDark .tpDaily tbody td,
+        body.adminHomeDark .tpDaily thead th,
+        body.adminHomeDark .tpDaily .tableWrap table th:nth-child(5),
+        body.adminHomeDark .tpDaily .tableWrap table td:nth-child(5),
+        body.adminHomeDark .tpDaily .tableWrap table th:nth-child(10),
+        body.adminHomeDark .tpDaily .tableWrap table td:nth-child(10),
+        body.adminHomeDark .tpDaily .tableWrap table th:nth-child(11),
+        body.adminHomeDark .tpDaily .tableWrap table td:nth-child(11),
+        body.adminHomeDark .tpDaily .tableWrap table th:nth-child(12),
+        body.adminHomeDark .tpDaily .tableWrap table td:nth-child(12) {
+            border-color: var(--theme-line) !important;
+        }
+
         .tpDaily .ops .iconBtn {
             opacity: .35;
             transition: opacity .12s ease;

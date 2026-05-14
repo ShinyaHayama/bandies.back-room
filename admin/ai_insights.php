@@ -24,8 +24,44 @@ function out(array $a): void
     exit;
 }
 
+set_exception_handler(function (Throwable $e): void {
+    out([
+        'ok' => false,
+        'error' => 'exception',
+        'message' => $e->getMessage(),
+        'where' => basename($e->getFile()) . ':' . $e->getLine(),
+    ]);
+});
+set_error_handler(function (int $severity, string $message, string $file, int $line): bool {
+    out([
+        'ok' => false,
+        'error' => 'php_error',
+        'message' => $message,
+        'where' => basename($file) . ':' . $line,
+        'severity' => $severity,
+    ]);
+    return true;
+});
+
 require_once __DIR__ . '/_auth.php';
-require_admin_login();
+admin_session_bootstrap();
+
+if (!isset($_SESSION['admin_auth']) || (int)$_SESSION['admin_auth'] !== 1) {
+    out(['ok' => false, 'error' => 'not logged in']);
+}
+
+if (!isset($_SESSION['tenant_id'])) {
+    $_SESSION['tenant_id'] = 1;
+}
+
+$authTenantId = (int)($_SESSION['tenant_id'] ?? 0);
+if ($authTenantId > 0 && admin_is_tenant_inactive($authTenantId)) {
+    out(['ok' => false, 'error' => 'tenant inactive']);
+}
+admin_load_acl();
+if ($authTenantId > 0 && admin_is_trial_restricted($authTenantId)) {
+    out(['ok' => false, 'error' => 'trial expired']);
+}
 
 require_once __DIR__ . '/_tenant_context.php';
 if (!isset($tenantId) || (int)$tenantId <= 0) {

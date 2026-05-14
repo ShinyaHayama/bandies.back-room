@@ -59,8 +59,38 @@ if (isset($pdo) && $pdo instanceof PDO) {
         $hdNoticeError = true;
     }
 }
+
+$hdThemeFile = __DIR__ . '/../lib/admin_theme.php';
+if (is_file($hdThemeFile)) {
+    require_once $hdThemeFile;
+}
+$hdTheme = ['mode' => 'dark', 'accent' => 'purple'];
+if (isset($pdo) && $pdo instanceof PDO) {
+    try {
+        if (function_exists('admin_theme_current')) {
+            $hdTheme = admin_theme_current($pdo, $hdAdminUserId);
+        }
+    } catch (Throwable $e) {
+        $hdTheme = ['mode' => 'dark', 'accent' => 'purple'];
+    }
+}
+$hdThemeBodyClass = function_exists('admin_theme_body_class') ? admin_theme_body_class($hdTheme) : 'adminTheme adminHomeDark themeAccentPurple';
 ?>
+<script>
+(function() {
+    var classes = <?= json_encode(explode(' ', $hdThemeBodyClass), JSON_UNESCAPED_SLASHES) ?>;
+    if (!document.body || !Array.isArray(classes)) return;
+    var remove = ['adminTheme', 'adminHomeDark'];
+    ['Red','Pink','Orange','Green','Cyan','Blue','Purple','Gold','Silver'].forEach(function(name) {
+        remove.push('themeAccent' + name);
+    });
+    remove.forEach(function(name) { document.body.classList.remove(name); });
+    classes.forEach(function(name) { if (name) document.body.classList.add(name); });
+})();
+</script>
 <style>
+<?= function_exists('admin_theme_global_css') ? admin_theme_global_css() : '' ?>
+
 /* ===== Header (HRMOS-like) ===== */
 .azHd,
 .azHd * {
@@ -125,6 +155,24 @@ if (isset($pdo) && $pdo instanceof PDO) {
     height: 32px;
     width: auto;
     display: block;
+}
+
+body.adminTheme .azLogo img {
+    display: none;
+}
+
+body.adminTheme .azLogo::before {
+    content: "〆ナビAI";
+    display: block;
+    font-size: 34px;
+    line-height: 1;
+    font-weight: 1000;
+    letter-spacing: .02em;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 20px var(--accentSoft);
 }
 
 
@@ -452,6 +500,248 @@ if (isset($pdo) && $pdo instanceof PDO) {
     text-align: center;
 }
 
+.azAiAskCard {
+    display: none;
+}
+
+@media (min-width: 901px) {
+    body.adminTheme .azAiAskCard {
+        position: relative;
+        display: grid;
+        gap: 8px;
+        margin: auto 0 0;
+        padding: 18px 14px 12px;
+        min-height: 176px;
+        border: 1px solid var(--accentBorder);
+        border-radius: 18px;
+        color: #f8fafc !important;
+        text-decoration: none;
+        background:
+            radial-gradient(120px 86px at 52% 76%, var(--accentGlow), transparent 70%),
+            radial-gradient(130px 90px at 45% 34%, var(--accentSoft), transparent 72%),
+            linear-gradient(180deg, color-mix(in srgb, var(--accent) 28%, #08111f), color-mix(in srgb, var(--accent) 12%, #070b13));
+        box-shadow: 0 18px 48px var(--accentSoft), 0 0 0 1px var(--accentSoft), inset 0 1px 0 rgba(255, 255, 255, .10);
+        overflow: hidden;
+    }
+
+    body.adminTheme .azAiAskCard::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+            linear-gradient(135deg, rgba(255,255,255,.16), transparent 34%),
+            linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 18%, transparent));
+        pointer-events: none;
+    }
+
+    body.adminTheme .azAiAskTitle {
+        position: relative;
+        font-size: 15px;
+        font-weight: 1000;
+        text-align: center;
+        color: color-mix(in srgb, var(--accent2) 42%, #ffffff);
+        text-shadow: 0 0 16px var(--accentGlow);
+    }
+
+    body.adminTheme .azAiAskText {
+        position: relative;
+        color: rgba(248, 250, 252, .76);
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.6;
+        text-align: center;
+    }
+
+    body.adminTheme .azAiAskIcon {
+        position: relative;
+        width: 58px;
+        height: 58px;
+        margin: 2px auto 0;
+        border-radius: 999px;
+        border: 1px solid var(--accentBorder);
+        color: color-mix(in srgb, var(--accent2) 66%, #ffffff);
+        background:
+            radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 62%),
+            rgba(8, 11, 18, .28);
+        display: grid;
+        place-items: center;
+        font-size: 24px;
+        font-weight: 1000;
+        text-shadow: 0 0 14px var(--accentGlow);
+        box-shadow: 0 0 30px var(--accentGlow), inset 0 0 18px var(--accentSoft);
+    }
+
+    body.adminTheme .azAiAskIcon::before,
+    body.adminTheme .azAiAskIcon::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        background: var(--accent2);
+    }
+
+    body.adminTheme .azAiAskIcon::before {
+        width: 6px;
+        height: 6px;
+        right: -10px;
+        top: 10px;
+    }
+
+    body.adminTheme .azAiAskIcon::after {
+        width: 4px;
+        height: 4px;
+        left: -12px;
+        bottom: 12px;
+    }
+}
+
+/* ===== Sidebar layout for admin pages except dashboard home ===== */
+@media (min-width: 901px) {
+    body.adminTheme:not(.adminHomeDashboard) {
+        padding-left: 230px;
+        padding-top: 72px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHd {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 230px;
+        height: 100vh;
+        border-right: 1px solid #e5e7eb;
+        border-bottom: 0;
+        z-index: 120;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdInner {
+        min-height: 100%;
+        padding: 16px 10px;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: 10px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdLeft,
+    body.adminTheme:not(.adminHomeDashboard) .azNav {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        overflow: visible;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdLeft {
+        flex: 1;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azLogo {
+        width: 100%;
+        padding: 8px 12px 24px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azLogo img {
+        height: 34px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azLogo::before {
+        font-size: 34px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdLeft > .azVLine,
+    body.adminTheme:not(.adminHomeDashboard) .azNav .azVLine {
+        display: none;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azMenuBtn {
+        display: none;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azNav a {
+        min-width: 0;
+        width: 100%;
+        min-height: 46px;
+        padding: 0 14px;
+        justify-content: flex-start;
+        border-radius: 10px;
+        font-size: 13px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azNav a.is-active::after {
+        display: none;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight {
+        position: fixed;
+        top: 16px;
+        right: 24px;
+        width: auto;
+        max-width: calc(100vw - 286px);
+        min-height: 42px;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        z-index: 140;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight > .azVLine {
+        height: 28px;
+        align-self: center;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azNoticeMenu,
+    body.adminTheme:not(.adminHomeDashboard) .azStore,
+    body.adminTheme:not(.adminHomeDashboard) .azUserMenu {
+        min-width: 0;
+        min-height: 42px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azNoticeBtn,
+    body.adminTheme:not(.adminHomeDashboard) .azUserBtn,
+    body.adminTheme:not(.adminHomeDashboard) .azStore select {
+        min-height: 42px;
+        border-radius: 10px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azUserBtn {
+        max-width: 260px;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azUserEmail {
+        display: block;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azStore select {
+        max-width: 180px;
+    }
+}
+
+body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions {
+    position: fixed !important;
+    top: 16px !important;
+    right: 24px !important;
+    left: auto !important;
+    width: auto !important;
+    max-width: calc(100vw - 286px) !important;
+    min-width: 0;
+    min-height: 42px;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    flex-wrap: nowrap !important;
+    gap: 10px !important;
+    z-index: 300 !important;
+}
+
+body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions > .azVLine {
+    height: 28px;
+    align-self: center;
+}
+
 /* mobile tune */
 @media (max-width: 900px) {
     .azHdInner {
@@ -533,7 +823,145 @@ if (isset($pdo) && $pdo instanceof PDO) {
         display: none;
     }
 
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions {
+        position: fixed !important;
+        top: 12px !important;
+        right: 12px !important;
+        left: auto !important;
+        width: auto !important;
+        max-width: calc(100vw - 24px) !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azStore {
+        display: flex;
+    }
+
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azNoticeMenu,
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azStore,
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azUserMenu,
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azNoticeBtn,
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azUserBtn,
+    body.adminTheme:not(.adminHomeDashboard) .azHdRight.azGlobalActions .azStore select {
+        width: auto;
+    }
+
     /* まずは見やすさ優先 */
+}
+
+/* unified sidebar actions */
+body.adminTheme .azHd .azHdRight {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    left: auto !important;
+    z-index: auto !important;
+    display: grid !important;
+    grid-template-columns: 1fr;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    gap: 8px !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin-top: 10px;
+}
+
+body.adminTheme .azHd .azHdRight > .azVLine {
+    display: none !important;
+}
+
+body.adminTheme .azHd .azNoticeMenu,
+body.adminTheme .azHd .azStore,
+body.adminTheme .azHd .azUserMenu {
+    width: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+body.adminTheme .azHd .azNoticeBtn,
+body.adminTheme .azHd .azStore select,
+body.adminTheme .azHd .azUserBtn {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 42px !important;
+    border: 1px solid rgba(148, 163, 184, .22) !important;
+    border-radius: 10px !important;
+    background: rgba(15, 23, 42, .72) !important;
+    color: #f8fafc !important;
+}
+
+body.adminTheme .azHd .azNoticeBtn {
+    position: relative;
+    justify-content: flex-start !important;
+    gap: 10px;
+    padding: 0 14px !important;
+    font-size: 18px;
+}
+
+body.adminTheme .azHd .azNoticeIcon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+body.adminTheme .azHd .azNoticeLabel {
+    display: inline;
+    font-size: 12px;
+    font-weight: 900;
+    color: #f8fafc;
+}
+
+body.adminTheme .azHd .azNoticeBadge {
+    top: -8px !important;
+    right: -10px !important;
+    border-color: #0f172a !important;
+}
+
+body.adminTheme .azHd .azStore select {
+    padding: 0 12px !important;
+}
+
+body.adminTheme .azHd .azUserBtn {
+    justify-content: space-between !important;
+}
+
+body.adminTheme .azHd .azUserEmail {
+    display: block;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #f8fafc !important;
+}
+
+body.adminTheme .azHd .azNoticeDropdown,
+body.adminTheme .azHd .azUserDropdown {
+    top: auto !important;
+    right: auto !important;
+    bottom: 100% !important;
+    left: 0 !important;
+    width: min(380px, calc(100vw - 24px));
+    min-width: 0;
+    margin: 0 0 8px !important;
+}
+
+@media (max-width: 900px) {
+    body.adminTheme .azHd .azHdRight {
+        margin: auto 14px 16px !important;
+        width: auto !important;
+    }
+}
+
+@media (min-width: 901px) {
+    body.adminTheme:not(.adminHomeDashboard) {
+        padding-top: 0 !important;
+    }
 }
 
 /* print */
@@ -616,7 +1044,7 @@ if (isset($pdo) && $pdo instanceof PDO) {
                 <div class="azVLine"></div> -->
 
                 <div class="azVLine"></div>
-                <a class="<?= hd_is_active('/admin/employees_new.php') ? 'is-active' : '' ?>"
+                <a class="<?= (hd_is_active('/admin/employees_new.php') || hd_is_active('/admin/expenses.php') || hd_is_active('/admin/devices_manage.php') || hd_is_active('/admin/color_settings.php')) ? 'is-active' : '' ?>"
                     href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>">
                     <span class="azIcon">⚙️</span>設定
                 </a>
@@ -626,6 +1054,13 @@ if (isset($pdo) && $pdo instanceof PDO) {
                     <span class="azIcon">📘</span>取扱説明
                 </a> -->
             </nav>
+
+            <a class="azAiAskCard" data-ai-ask-launch="1"
+                href="/admin/index.php?store_id=<?= (int)$storeId ?>&open_ai=1">
+                <span class="azAiAskTitle">AIに質問する</span>
+                <span class="azAiAskText">データから改善提案を受け取る</span>
+                <span class="azAiAskIcon" aria-hidden="true">AI</span>
+            </a>
         </div>
 
         <div class="azHdRight">
@@ -646,10 +1081,13 @@ if (isset($pdo) && $pdo instanceof PDO) {
             <div class="azNoticeMenu" id="azNoticeMenu">
                 <button class="azNoticeBtn" type="button" id="azNoticeBtn" aria-haspopup="true"
                     aria-expanded="false" aria-label="お知らせ">
-                    <span aria-hidden="true">🔔</span>
-                    <?php if ($hdUnreadNoticeCount > 0): ?>
-                    <span class="azNoticeBadge"><?= (int)min($hdUnreadNoticeCount, 99) ?></span>
-                    <?php endif; ?>
+                    <span class="azNoticeIcon" aria-hidden="true">
+                        🔔
+                        <?php if ($hdUnreadNoticeCount > 0): ?>
+                        <span class="azNoticeBadge"><?= (int)min($hdUnreadNoticeCount, 99) ?></span>
+                        <?php endif; ?>
+                    </span>
+                    <span class="azNoticeLabel">お知らせ</span>
                 </button>
                 <div class="azNoticeDropdown" id="azNoticeDropdown">
                     <div class="azNoticeHead">
@@ -703,6 +1141,7 @@ if (isset($pdo) && $pdo instanceof PDO) {
                 <div class="azUserDropdown" id="azUserDropdown">
                     <a href="/admin/account.php">アカウント</a>
                     <a href="/admin/admin_users.php">ユーザー権限</a>
+                    <a href="/admin/color_settings.php">色変更</a>
                     <a href="/admin/manual.php">取扱説明書</a>
                     <a class="is-danger" href="/admin/logout.php">ログアウト</a>
                 </div>
@@ -795,6 +1234,44 @@ if (isset($pdo) && $pdo instanceof PDO) {
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeNav();
+    });
+})();
+
+(function() {
+    const actions = document.querySelector('.azHdRight');
+    if (!actions) return;
+
+    const placeActions = () => {
+        const isMobile = window.matchMedia('(max-width: 900px)').matches;
+        const target = isMobile
+            ? document.getElementById('azNav')
+            : document.querySelector('.azAiAskCard');
+
+        if (!target) return;
+
+        if (isMobile) {
+            if (!target.contains(actions)) target.appendChild(actions);
+            return;
+        }
+
+        if (target.nextElementSibling !== actions) {
+            target.insertAdjacentElement('afterend', actions);
+        }
+    };
+
+    placeActions();
+    window.addEventListener('resize', placeActions);
+})();
+
+(function() {
+    const launch = document.querySelector('[data-ai-ask-launch]');
+    if (!launch) return;
+
+    launch.addEventListener('click', (ev) => {
+        if (!document.body.classList.contains('adminHomeDashboard')) return;
+        if (typeof window.openAiConsultation !== 'function') return;
+        ev.preventDefault();
+        window.openAiConsultation();
     });
 })();
 </script>

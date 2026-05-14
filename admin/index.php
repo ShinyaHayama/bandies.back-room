@@ -61,11 +61,22 @@ if ($dbFile === null) {
 }
 require_once $dbFile;
 require_once __DIR__ . '/../lib/store_expenses.php';
+require_once __DIR__ . '/../lib/admin_theme.php';
 
 $pdo = db();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 store_expenses_ensure_schema($pdo);
+$adminUserId = (int)($_SESSION['tenant_admin_user_id'] ?? 0);
+$adminTheme = admin_theme_current($pdo, $adminUserId);
+$adminThemeBodyClass = admin_theme_body_class($adminTheme);
+$adminThemeChartPalette = admin_theme_chart_palette((string)$adminTheme['accent']);
+$adminThemeChartPalette['axis'] = ($adminTheme['mode'] === 'dark') ? 'rgba(226,232,240,0.66)' : 'rgba(17,17,17,0.55)';
+$adminThemeChartPalette['legend'] = ($adminTheme['mode'] === 'dark') ? 'rgba(226,232,240,0.78)' : 'rgba(17,17,17,0.75)';
+$adminThemeChartPalette['grid'] = ($adminTheme['mode'] === 'dark') ? 'rgba(148,163,184,0.16)' : 'rgba(0,0,0,0.06)';
+$adminThemeChartPalette['axisLine'] = ($adminTheme['mode'] === 'dark') ? 'rgba(148,163,184,0.20)' : 'rgba(0,0,0,0.10)';
+$adminThemeChartPalette['bg0'] = ($adminTheme['mode'] === 'dark') ? '#0b1020' : '#ffffff';
+$adminThemeChartPalette['bg1'] = ($adminTheme['mode'] === 'dark') ? '#111827' : '#fbfbff';
 
 function h(string $s): string
 {
@@ -591,6 +602,47 @@ function monthly_metrics_excluding_holidays(array $dates, array $salesMap, array
     ];
 }
 
+function sales_map_has_customers(array $salesMap): bool
+{
+    foreach ($salesMap as $row) {
+        if (is_array($row) && array_key_exists('customers', $row) && is_int($row['customers'])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function sales_customer_totals_for_dates(array $dates, array $salesMap, bool $customersAvailable): array
+{
+    $sales = 0;
+    $customers = $customersAvailable ? 0 : null;
+
+    foreach ($dates as $d) {
+        $sales += (int)($salesMap[$d]['sales'] ?? 0);
+        if ($customersAvailable) {
+            $customers += (int)($salesMap[$d]['customers'] ?? 0);
+        }
+    }
+
+    return [
+        'sales' => $sales,
+        'customers' => $customers,
+    ];
+}
+
+function kpi_delta_class(?int $delta): string
+{
+    if ($delta === null || $delta === 0) return 'isFlat';
+    return ($delta > 0) ? 'isUp' : 'isDown';
+}
+
+function kpi_delta_text(?int $delta, string $unit): string
+{
+    if ($delta === null) return '-';
+    $prefix = ($delta > 0) ? '+' : (($delta < 0) ? '-' : '±');
+    return $prefix . number_format(abs($delta)) . $unit;
+}
+
 // =========================================================
 // ✅ KPI：表示期間（$periodStart〜$periodEnd）で算出
 // =========================================================
@@ -619,6 +671,41 @@ $laborAvgPerDay = ($openDaysMonth > 0) ? (int)round($laborMonth / $openDaysMonth
 
 $customersAvgPerDay = ($customersDaysMonth > 0) ? (int)round($customersMonth / $customersDaysMonth) : null;
 $avgTicketMonth = ($customersMonth > 0 && $salesMonth > 0) ? (int)floor($salesMonth / $customersMonth) : null;
+
+$compareEndDt = DateTimeImmutable::createFromFormat('!Y-m-d', $periodEnd, new DateTimeZone($tz));
+if (!$compareEndDt) {
+    $compareEndDt = new DateTimeImmutable($periodEnd, new DateTimeZone($tz));
+}
+$compareDate = $compareEndDt->format('Y-m-d');
+$comparePrevDay = $compareEndDt->modify('-1 day')->format('Y-m-d');
+$compareMonthStartDt = $compareEndDt->modify('first day of this month');
+$compareMonthStart = $compareMonthStartDt->format('Y-m-d');
+
+$comparePrevMonthStartDt = $compareEndDt->modify('first day of previous month');
+$comparePrevMonthLastDt = $comparePrevMonthStartDt->modify('last day of this month');
+$compareDayOffset = max(0, (int)$compareEndDt->format('j') - 1);
+$comparePrevMonthEndDt = $comparePrevMonthStartDt->modify('+' . $compareDayOffset . ' days');
+if ($comparePrevMonthEndDt > $comparePrevMonthLastDt) {
+    $comparePrevMonthEndDt = $comparePrevMonthLastDt;
+}
+$comparePrevMonthStart = $comparePrevMonthStartDt->format('Y-m-d');
+$comparePrevMonthEnd = $comparePrevMonthEndDt->format('Y-m-d');
+
+$salesCompareMap = sales_map_with_customers($pdo, $tenantId, $storeId, $comparePrevMonthStart, $compareDate, $tz, $cutoffTime);
+$customersCompareAvailable = ($customersDaysMonth > 0 || sales_map_has_customers($salesCompareMap));
+
+$salesPrevDayDiff = (int)($salesCompareMap[$compareDate]['sales'] ?? 0) - (int)($salesCompareMap[$comparePrevDay]['sales'] ?? 0);
+$customersPrevDayDiff = $customersCompareAvailable
+    ? ((int)($salesCompareMap[$compareDate]['customers'] ?? 0) - (int)($salesCompareMap[$comparePrevDay]['customers'] ?? 0))
+    : null;
+
+$compareCurrentTotals = sales_customer_totals_for_dates(ymd_range($compareMonthStart, $compareDate, $tz), $salesCompareMap, $customersCompareAvailable);
+$comparePrevMonthTotals = sales_customer_totals_for_dates(ymd_range($comparePrevMonthStart, $comparePrevMonthEnd, $tz), $salesCompareMap, $customersCompareAvailable);
+
+$salesPrevMonthDiff = (int)$compareCurrentTotals['sales'] - (int)$comparePrevMonthTotals['sales'];
+$customersPrevMonthDiff = $customersCompareAvailable
+    ? ((int)$compareCurrentTotals['customers'] - (int)$comparePrevMonthTotals['customers'])
+    : null;
 
 $expenseSummary = store_expenses_summary($pdo, $tenantId, $storeId, $periodStart, $periodEnd);
 $expenseHasSettings = (bool)($expenseSummary['has_settings'] ?? false);
@@ -705,8 +792,14 @@ function badge_note(string $key, array $noteMap): string
     return $noteMap[$key] ?? '';
 }
 
-function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): string
+function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap, array $palette): string
 {
+    $axisText = (string)($palette['axis'] ?? 'rgba(17,17,17,0.55)');
+    $legendText = (string)($palette['legend'] ?? 'rgba(17,17,17,0.75)');
+    $gridColor = (string)($palette['grid'] ?? 'rgba(0,0,0,0.06)');
+    $axisLineColor = (string)($palette['axisLine'] ?? 'rgba(0,0,0,0.10)');
+    $bg0 = (string)($palette['bg0'] ?? '#ffffff');
+    $bg1 = (string)($palette['bg1'] ?? '#fbfbff');
     $sales = [];
     $labor = [];
     $rate  = [];
@@ -766,21 +859,21 @@ function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): 
     $gridLines = '';
     for ($g = 0; $g <= 5; $g++) {
         $yy = $padT + ($plotH / 5) * $g;
-        $gridLines .= '<line x1="' . $padL . '" y1="' . sprintf('%.1f', $yy) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $yy) . '" stroke="rgba(0,0,0,0.06)" stroke-width="1" />';
+        $gridLines .= '<line x1="' . $padL . '" y1="' . sprintf('%.1f', $yy) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $yy) . '" stroke="' . $gridColor . '" stroke-width="1" />';
     }
 
     $leftTicks = [0, (int)round($maxYen / 2), $maxYen];
     $leftLabels = '';
     foreach ($leftTicks as $v) {
         $yy = $yOfYen($v);
-        $leftLabels .= '<text x="' . ($padL - 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="end" font-size="11" fill="rgba(17,17,17,0.55)">' . number_format($v) . '</text>';
+        $leftLabels .= '<text x="' . ($padL - 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="end" font-size="11" fill="' . $axisText . '">' . number_format($v) . '</text>';
     }
 
     $rightTicks = [0.0, round($maxRate / 2, 0), $maxRate];
     $rightLabels = '';
     foreach ($rightTicks as $v) {
         $yy = $yOfRate((float)$v);
-        $rightLabels .= '<text x="' . ($w - $padR + 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="start" font-size="11" fill="rgba(17,17,17,0.55)">' . number_format((float)$v, 0) . '%</text>';
+        $rightLabels .= '<text x="' . ($w - $padR + 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="start" font-size="11" fill="' . $axisText . '">' . number_format((float)$v, 0) . '%</text>';
     }
 
     $xLabels = '';
@@ -789,14 +882,14 @@ function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): 
         if ($i % $tickEvery === 0 || $i === $n - 1) {
             $x = $xOf($i);
             $label = substr($d, 5);
-            $xLabels .= '<text x="' . sprintf('%.1f', $x) . '" y="' . ($h - 18) . '" text-anchor="middle" font-size="11" fill="rgba(17,17,17,0.55)">' . $label . '</text>';
+            $xLabels .= '<text x="' . sprintf('%.1f', $x) . '" y="' . ($h - 18) . '" text-anchor="middle" font-size="11" fill="' . $axisText . '">' . $label . '</text>';
         }
         $i++;
     }
 
-    $colSales = '#2F6BFF';
-    $colLabor = '#EF4444';
-    $colRate  = '#9CA3AF';
+    $colSales = (string)($palette['sales'] ?? '#A855F7');
+    $colLabor = (string)($palette['labor'] ?? '#FB7185');
+    $colRate  = (string)($palette['muted'] ?? '#A855F7');
 
     $dots = '';
     $i = 0;
@@ -810,17 +903,17 @@ function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): 
 
     $legend = '
       <g font-size="12" fill="#111">
-        <rect x="0" y="0" width="14" height="4" rx="2" fill="' . $colSales . '" /><text x="20" y="5" fill="rgba(17,17,17,0.75)">売上(円)</text>
-        <rect x="96" y="0" width="14" height="4" rx="2" fill="' . $colLabor . '" /><text x="116" y="5" fill="rgba(17,17,17,0.75)">人件費(円)</text>
-        <rect x="210" y="0" width="14" height="4" rx="2" fill="' . $colRate  . '" /><text x="230" y="5" fill="rgba(17,17,17,0.75)">人件費率(%)</text>
+        <rect x="0" y="0" width="14" height="4" rx="2" fill="' . $colSales . '" /><text x="20" y="5" fill="' . $legendText . '">売上(円)</text>
+        <rect x="96" y="0" width="14" height="4" rx="2" fill="' . $colLabor . '" /><text x="116" y="5" fill="' . $legendText . '">人件費(円)</text>
+        <rect x="210" y="0" width="14" height="4" rx="2" fill="' . $colRate  . '" /><text x="230" y="5" fill="' . $legendText . '">人件費率(%)</text>
       </g>';
 
     return '
 <svg viewBox="0 0 ' . $w . ' ' . $h . '" width="100%" height="auto" role="img" aria-label="売上・人件費・率の推移">
   <defs>
     <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#fbfbff"/>
+      <stop offset="0%" stop-color="' . $bg0 . '"/>
+      <stop offset="100%" stop-color="' . $bg1 . '"/>
     </linearGradient>
     <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="rgba(0,0,0,0.10)"/>
@@ -831,8 +924,8 @@ function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): 
 
   ' . $gridLines . '
 
-  <line x1="' . $padL . '" y1="' . $padT . '" x2="' . $padL . '" y2="' . ($h - $padB) . '" stroke="rgba(0,0,0,0.10)" />
-  <line x1="' . ($w - $padR) . '" y1="' . $padT . '" x2="' . ($w - $padR) . '" y2="' . ($h - $padB) . '" stroke="rgba(0,0,0,0.10)" />
+  <line x1="' . $padL . '" y1="' . $padT . '" x2="' . $padL . '" y2="' . ($h - $padB) . '" stroke="' . $axisLineColor . '" />
+  <line x1="' . ($w - $padR) . '" y1="' . $padT . '" x2="' . ($w - $padR) . '" y2="' . ($h - $padB) . '" stroke="' . $axisLineColor . '" />
 
   ' . $leftLabels . '
   ' . $rightLabels . '
@@ -846,8 +939,11 @@ function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap): 
 </svg>';
 }
 
-function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, float $greenMax, float $yellowMax): string
+function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, float $greenMax, float $yellowMax, array $palette): string
 {
+    $axisText = (string)($palette['axis'] ?? 'rgba(17,17,17,0.55)');
+    $gridColor = (string)($palette['grid'] ?? 'rgba(0,0,0,0.06)');
+    $axisLineColor = (string)($palette['axisLine'] ?? 'rgba(0,0,0,0.10)');
     $rate = [];
     $maxRate = 0.0;
 
@@ -889,14 +985,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     $gridLines = '';
     for ($g = 0; $g <= 5; $g++) {
         $yy = $padT + ($plotH / 5) * $g;
-        $gridLines .= '<line x1="' . $padL . '" y1="' . sprintf('%.1f', $yy) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $yy) . '" stroke="rgba(0,0,0,0.06)" stroke-width="1" />';
+        $gridLines .= '<line x1="' . $padL . '" y1="' . sprintf('%.1f', $yy) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $yy) . '" stroke="' . $gridColor . '" stroke-width="1" />';
     }
 
     $rightTicks = [0.0, round($maxRate / 2, 0), $maxRate];
     $rightLabels = '';
     foreach ($rightTicks as $v) {
         $yy = $yOfRate((float)$v);
-        $rightLabels .= '<text x="' . ($w - $padR + 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="start" font-size="11" fill="rgba(17,17,17,0.55)">' . number_format((float)$v, 0) . '%</text>';
+        $rightLabels .= '<text x="' . ($w - $padR + 10) . '" y="' . sprintf('%.1f', $yy + 4) . '" text-anchor="start" font-size="11" fill="' . $axisText . '">' . number_format((float)$v, 0) . '%</text>';
     }
 
     $xLabels = '';
@@ -905,14 +1001,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         if ($i % $tickEvery === 0 || $i === $n - 1) {
             $x = $xOf($i);
             $label = substr($d, 5);
-            $xLabels .= '<text x="' . sprintf('%.1f', $x) . '" y="' . ($h - 16) . '" text-anchor="middle" font-size="11" fill="rgba(17,17,17,0.55)">' . $label . '</text>';
+            $xLabels .= '<text x="' . sprintf('%.1f', $x) . '" y="' . ($h - 16) . '" text-anchor="middle" font-size="11" fill="' . $axisText . '">' . $label . '</text>';
         }
         $i++;
     }
 
-    $colRate = '#111827';
-    $colWarn = '#f97316';
-    $colDanger = '#dc2626';
+    $colRate = (string)($palette['accent'] ?? '#A855F7');
+    $colWarn = (string)($palette['warn'] ?? '#FACC15');
+    $colDanger = (string)($palette['danger'] ?? '#FB4D6D');
 
     $dots = '';
     $i = 0;
@@ -931,8 +1027,8 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     return '
 <svg viewBox="0 0 ' . $w . ' ' . $h . '" width="100%" height="auto" role="img" aria-label="人件費率の推移">
   ' . $gridLines . '
-  <line x1="' . $padL . '" y1="' . $padT . '" x2="' . $padL . '" y2="' . ($h - $padB) . '" stroke="rgba(0,0,0,0.10)" />
-  <line x1="' . ($w - $padR) . '" y1="' . $padT . '" x2="' . ($w - $padR) . '" y2="' . ($h - $padB) . '" stroke="rgba(0,0,0,0.10)" />
+  <line x1="' . $padL . '" y1="' . $padT . '" x2="' . $padL . '" y2="' . ($h - $padB) . '" stroke="' . $axisLineColor . '" />
+  <line x1="' . ($w - $padR) . '" y1="' . $padT . '" x2="' . ($w - $padR) . '" y2="' . ($h - $padB) . '" stroke="' . $axisLineColor . '" />
 
   <line x1="' . $padL . '" y1="' . sprintf('%.1f', $lineGreen) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $lineGreen) . '" stroke="rgba(34,197,94,0.5)" stroke-dasharray="4,4" />
   <line x1="' . $padL . '" y1="' . sprintf('%.1f', $lineYellow) . '" x2="' . ($w - $padR) . '" y2="' . sprintf('%.1f', $lineYellow) . '" stroke="rgba(251,146,60,0.6)" stroke-dasharray="4,4" />
@@ -1313,6 +1409,51 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         font-weight: 900;
         color: var(--muted);
         line-height: 1.4;
+    }
+
+    .kpiCompareStack {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+    .kpiCompareRow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 44px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, .08);
+        background: rgba(248, 250, 252, .88);
+        font-size: 13px;
+        font-weight: 1000;
+    }
+
+    .kpiCompareLabel {
+        color: var(--muted);
+        white-space: nowrap;
+    }
+
+    .kpiCompareValue {
+        color: #64748b;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        font-size: 15px;
+        line-height: 1;
+    }
+
+    .kpiCompareValue.isUp {
+        color: #059669;
+    }
+
+    .kpiCompareValue.isDown {
+        color: #dc2626;
+    }
+
+    .kpiCompareValue.isFlat {
+        color: #64748b;
     }
 
     .kpiConditions {
@@ -2139,10 +2280,810 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     .aiCloseBtn:hover {
         background: #f3f3f3;
     }
+
+    .adminTheme.themeAccentPurple { --accent:#7c3aed; --accent2:#9333ea; --accentGlow:rgba(124,58,237,.34); --accentSoft:rgba(124,58,237,.12); --accentBorder:rgba(167,139,250,.34); }
+    .adminTheme.themeAccentBlue { --accent:#2563eb; --accent2:#0ea5e9; --accentGlow:rgba(37,99,235,.34); --accentSoft:rgba(37,99,235,.12); --accentBorder:rgba(96,165,250,.34); }
+    .adminTheme.themeAccentGreen { --accent:#059669; --accent2:#10b981; --accentGlow:rgba(5,150,105,.34); --accentSoft:rgba(5,150,105,.12); --accentBorder:rgba(52,211,153,.34); }
+    .adminTheme.themeAccentOrange { --accent:#ea580c; --accent2:#f59e0b; --accentGlow:rgba(234,88,12,.34); --accentSoft:rgba(234,88,12,.12); --accentBorder:rgba(251,146,60,.34); }
+    .adminTheme.themeAccentRed { --accent:#dc2626; --accent2:#f43f5e; --accentGlow:rgba(220,38,38,.34); --accentSoft:rgba(220,38,38,.12); --accentBorder:rgba(248,113,113,.34); }
+    .adminTheme.themeAccentPink { --accent:#db2777; --accent2:#ec4899; --accentGlow:rgba(219,39,119,.34); --accentSoft:rgba(219,39,119,.12); --accentBorder:rgba(244,114,182,.34); }
+    .adminTheme.themeAccentGold { --accent:#b8860b; --accent2:#f5d06f; --accentGlow:rgba(212,175,55,.38); --accentSoft:rgba(212,175,55,.13); --accentBorder:rgba(245,208,111,.44); }
+    .adminTheme.themeAccentSilver { --accent:#94a3b8; --accent2:#f8fafc; --accentGlow:rgba(226,232,240,.36); --accentSoft:rgba(226,232,240,.12); --accentBorder:rgba(248,250,252,.40); }
+    .adminTheme.themeAccentCyan { --accent:#0891b2; --accent2:#06b6d4; --accentGlow:rgba(8,145,178,.34); --accentSoft:rgba(8,145,178,.12); --accentBorder:rgba(34,211,238,.34); }
+    .adminTheme { --blue: var(--accent); --violet: var(--accent); --black: var(--accent); }
+
+    body.adminHomeDark {
+        --bg: #080b12;
+        --card: rgba(15, 20, 31, .88);
+        --text: #eef2ff;
+        --muted: rgba(203, 213, 225, .72);
+        --line: rgba(148, 163, 184, .18);
+        --blue: var(--accent);
+        --violet: var(--accent);
+        --black: var(--accent);
+        --shadow: 0 18px 48px rgba(0, 0, 0, .34);
+        background:
+            radial-gradient(760px 420px at 18% -10%, var(--accentSoft), transparent 62%),
+            radial-gradient(760px 520px at 82% 8%, var(--accentSoft), transparent 62%),
+            linear-gradient(180deg, #070a11 0%, #0b111d 48%, #070a11 100%);
+        color: var(--text);
+    }
+
+    body.adminHomeDark .azHd {
+        background: rgba(8, 11, 18, .88) !important;
+        border-bottom-color: rgba(148, 163, 184, .16) !important;
+        backdrop-filter: blur(14px);
+    }
+
+    body.adminHomeDark .azVLine,
+    body.adminHomeDark .azNav .azVLine { background: rgba(148, 163, 184, .16) !important; }
+
+    body.adminHomeDark .azLogo,
+    body.adminHomeDark .azNav a,
+    body.adminHomeDark .azNoticeBtn,
+    body.adminHomeDark .azMenuBtn,
+    body.adminHomeDark .azStore,
+    body.adminHomeDark .azUserBtn,
+    body.adminHomeDark .azUserBtn .azUserEmail { color: #e5e7eb !important; }
+
+    body.adminHomeDark .azNav,
+    body.adminHomeDark .azNav a,
+    body.adminHomeDark .azNoticeBtn,
+    body.adminHomeDark .azUserBtn { background: transparent !important; }
+
+    body.adminHomeDark .azNav a:hover,
+    body.adminHomeDark .azNoticeBtn:hover,
+    body.adminHomeDark .azUserBtn:hover { background: rgba(148, 163, 184, .10) !important; }
+
+    body.adminHomeDark .azNav a.is-active,
+    body.adminHomeDark .tabBtn[aria-selected="true"],
+    body.adminHomeDark .chartBtn.active,
+    body.adminHomeDark .filters button,
+    body.adminHomeDark .actionBtn,
+    body.adminHomeDark .aiBtn,
+    body.adminHomeDark .aiAskSend {
+        background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
+        color: #fff !important;
+        border-color: var(--accentBorder) !important;
+        box-shadow: 0 12px 30px var(--accentGlow) !important;
+    }
+
+    body.adminHomeDark .azStore select,
+    body.adminHomeDark .azUserDropdown,
+    body.adminHomeDark .azNoticeDropdown,
+    body.adminHomeDark .tabBtn,
+    body.adminHomeDark .pill,
+    body.adminHomeDark .chartToggle,
+    body.adminHomeDark .filters select,
+    body.adminHomeDark .editLink,
+    body.adminHomeDark .deepBtn,
+    body.adminHomeDark .aiCloseBtn {
+        background: rgba(15, 20, 31, .92) !important;
+        border-color: rgba(148, 163, 184, .20) !important;
+        color: rgba(226, 232, 240, .88) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+
+    body.adminHomeDark .card,
+    body.adminHomeDark .kpiCard,
+    body.adminHomeDark .dailyCard,
+    body.adminHomeDark .helpBody details,
+    body.adminHomeDark .aiBox {
+        background: linear-gradient(180deg, rgba(18, 24, 38, .92), rgba(11, 17, 29, .92));
+        border-color: rgba(148, 163, 184, .18);
+        box-shadow: var(--shadow);
+    }
+
+    body.adminHomeDark .cardHead,
+    body.adminHomeDark .filtersBar,
+    body.adminHomeDark details.chartAcc summary,
+    body.adminHomeDark .helpBody summary,
+    body.adminHomeDark .table thead,
+    body.adminHomeDark .table thead th {
+        background: linear-gradient(180deg, rgba(20, 27, 43, .96), rgba(12, 18, 30, .96));
+        border-color: rgba(148, 163, 184, .14);
+        color: #e5e7eb;
+    }
+
+    body.adminHomeDark .pageTitle,
+    body.adminHomeDark .cardHeadTitle,
+    body.adminHomeDark .filtersBar h3,
+    body.adminHomeDark .kpiValue,
+    body.adminHomeDark .dailyCardHead,
+    body.adminHomeDark .helpItemTitle,
+    body.adminHomeDark .aiHeaderTitle,
+    body.adminHomeDark .azNoticeTitle,
+    body.adminHomeDark .azNoticeHead strong,
+    body.adminHomeDark .azUserDropdown a { color: #f8fafc !important; }
+
+    body.adminHomeDark .kpiLabel,
+    body.adminHomeDark .kpiUnit,
+    body.adminHomeDark .kpiSub,
+    body.adminHomeDark .kpiCompareLabel,
+    body.adminHomeDark .kpiConditions,
+    body.adminHomeDark .kpiDetailSummary,
+    body.adminHomeDark .kpiDetailBody,
+    body.adminHomeDark .metaLine,
+    body.adminHomeDark .filterLabel,
+    body.adminHomeDark .filters label,
+    body.adminHomeDark .flowHint,
+    body.adminHomeDark .pageLead,
+    body.adminHomeDark .pageSub,
+    body.adminHomeDark .actionCardBody,
+    body.adminHomeDark .helpItemText,
+    body.adminHomeDark .aiBtnHint,
+    body.adminHomeDark .deepBtnsLabel,
+    body.adminHomeDark .deepNightSub,
+    body.adminHomeDark .dailyKey,
+    body.adminHomeDark .azNoticeBody,
+    body.adminHomeDark .azNoticeDate,
+    body.adminHomeDark .azNoticeEmpty { color: var(--muted) !important; }
+
+    body.adminHomeDark .kpiCompareRow {
+        background: rgba(15, 20, 31, .78);
+        border-color: rgba(148, 163, 184, .18);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+
+    body.adminHomeDark .kpiCompareValue.isUp {
+        color: #34d399;
+    }
+
+    body.adminHomeDark .kpiCompareValue.isDown {
+        color: #fb7185;
+    }
+
+    body.adminHomeDark .kpiCompareValue.isFlat {
+        color: rgba(226, 232, 240, .72);
+    }
+
+    body.adminHomeDark .kpiCard { position: relative; overflow: hidden; }
+    body.adminHomeDark .kpiCard::after {
+        content: "";
+        position: absolute;
+        right: -28px;
+        top: -28px;
+        width: 92px;
+        height: 92px;
+        border-radius: 999px;
+        background: radial-gradient(circle, var(--accentGlow), transparent 68%);
+        pointer-events: none;
+    }
+
+    body.adminHomeDark .chartWrap {
+        background: radial-gradient(620px 240px at 52% 100%, var(--accentSoft), transparent 72%), transparent;
+    }
+
+    body.adminHomeDark .table th,
+    body.adminHomeDark .table td,
+    body.adminHomeDark .dailyRow,
+    body.adminHomeDark .aiChatLog {
+        border-color: rgba(148, 163, 184, .13);
+        color: rgba(226, 232, 240, .88);
+    }
+
+    body.adminHomeDark .table tbody tr:hover td { background: rgba(148, 163, 184, .06); }
+    body.adminHomeDark .row-no-att td { color: rgba(148, 163, 184, .46) !important; }
+    body.adminHomeDark .row-sales-zero td,
+    body.adminHomeDark .date.sat { color: #60a5fa !important; }
+    body.adminHomeDark .row-anom td,
+    body.adminHomeDark .date.sun { color: #fb7185 !important; }
+
+    body.adminHomeDark .warnBox {
+        background: rgba(251, 191, 36, .08);
+        border-color: rgba(251, 191, 36, .28);
+        color: #fde68a;
+    }
+
+    body.adminHomeDark .bg-success { background: rgba(16,185,129,.18); color:#6ee7b7; border-color:rgba(16,185,129,.30); }
+    body.adminHomeDark .bg-warning { background: rgba(250,204,21,.18); color:#fde68a; border-color:rgba(250,204,21,.30); }
+    body.adminHomeDark .bg-danger { background: rgba(251,77,109,.18); color:#fb7185; border-color:rgba(251,77,109,.30); }
+    body.adminHomeDark .bg-muted,
+    body.adminHomeDark .bg-zero { background: rgba(148,163,184,.14); color:rgba(203,213,225,.78); border-color:rgba(148,163,184,.20); }
+
+    body.adminHomeDark .aiHeaderRow,
+    body.adminHomeDark .aiInsight,
+    body.adminHomeDark .aiTurnA,
+    body.adminHomeDark .deepBtnsRow {
+        background: var(--accentSoft);
+        border-color: var(--accentBorder);
+        color: #e5e7eb;
+    }
+
+    body.adminHomeDark .aiHeaderBadge,
+    body.adminHomeDark .aiTurnHead .tag { background: linear-gradient(135deg, var(--accent), var(--accent2)) !important; color:#fff !important; }
+    body.adminHomeDark .aiTurnQ { background: rgba(34,211,238,.10); border-color: rgba(34,211,238,.22); color:#cffafe; }
+    body.adminHomeDark .aiAskInput { background: rgba(8,11,18,.78); border-color: rgba(148,163,184,.22); color:#f8fafc; }
+    body.adminHomeDark .aiAskInput::placeholder { color: rgba(203,213,225,.46); }
+    body.adminHomeDark .editLink:hover,
+    body.adminHomeDark .deepBtn:hover,
+    body.adminHomeDark .aiCloseBtn:hover { background: var(--accentSoft); border-color: var(--accentBorder); }
+
+    /* ===== Home layout refresh ===== */
+    body.adminHomeDashboard {
+        background: #080b12;
+    }
+
+    body.adminHomeDashboard .azHd {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 230px;
+        height: 100vh;
+        border-right: 1px solid rgba(148, 163, 184, .16);
+        border-bottom: 0 !important;
+        z-index: 120;
+    }
+
+    body.adminHomeDashboard .azHdInner,
+    body.adminHomeDashboard .azHdLeft,
+    body.adminHomeDashboard .azHdRight,
+    body.adminHomeDashboard .azNav {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+
+    body.adminHomeDashboard .azHdInner {
+        min-height: 100%;
+        padding: 16px 10px;
+        gap: 10px;
+        justify-content: flex-start;
+    }
+
+    body.adminHomeDashboard .azHdLeft {
+        gap: 10px;
+        flex: 1;
+    }
+
+    body.adminHomeDashboard .azLogo {
+        width: 100%;
+        padding: 8px 12px 24px;
+    }
+
+    body.adminHomeDashboard .azLogo img {
+        height: 34px;
+    }
+
+    body.adminHomeDashboard .azLogo::before {
+        font-size: 34px;
+    }
+
+    body.adminHomeDashboard .azVLine {
+        display: none;
+    }
+
+    body.adminHomeDashboard .azNav {
+        gap: 6px;
+        overflow: visible;
+    }
+
+    body.adminHomeDashboard .azNav a {
+        min-width: 0;
+        width: 100%;
+        min-height: 46px;
+        justify-content: flex-start;
+        padding: 0 14px;
+        border-radius: 10px;
+        font-size: 13px;
+    }
+
+    body.adminHomeDashboard .azNav a.is-active::after {
+        display: none;
+    }
+
+    body.adminHomeDashboard .azHd .azHdRight {
+        display: none;
+    }
+
+    body.adminHomeDashboard .topRow .azHdRight {
+        display: flex;
+        position: static !important;
+        top: auto !important;
+        right: auto !important;
+        left: auto !important;
+        z-index: auto;
+        width: auto;
+        max-width: min(560px, 52vw);
+        min-width: 0;
+        margin: 0 0 0 auto;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: 10px;
+    }
+
+    body.adminHomeDashboard .azNoticeMenu,
+    body.adminHomeDashboard .azStore,
+    body.adminHomeDashboard .azUserMenu {
+        width: auto;
+        min-width: 0;
+        min-height: 42px;
+    }
+
+    body.adminHomeDashboard .azNoticeBtn,
+    body.adminHomeDashboard .azUserBtn {
+        width: auto;
+        max-width: 260px;
+        min-height: 42px;
+        border-radius: 10px;
+    }
+
+    body.adminHomeDashboard .azUserEmail {
+        display: block;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    body.adminHomeDashboard .azStore select {
+        width: auto;
+        max-width: 180px;
+        min-height: 42px;
+        border-radius: 10px;
+        justify-content: flex-start;
+    }
+
+    body.adminHomeDashboard .azNoticeDropdown,
+    body.adminHomeDashboard .azUserDropdown {
+        left: auto;
+        right: 0;
+        bottom: auto;
+        top: 100%;
+        margin: 8px 0 0;
+    }
+
+    body.adminHomeDashboard .tabsBar {
+        display: none;
+    }
+
+    body.adminHomeDashboard .page {
+        margin-left: 230px;
+        padding: 22px 28px 32px;
+    }
+
+    body.adminHomeDashboard .topRow {
+        min-height: 54px;
+        margin-bottom: 8px;
+    }
+
+    body.adminHomeDashboard .topRow::before {
+        content: "ダッシュボード";
+        color: #f8fafc;
+        font-size: 24px;
+        font-weight: 1000;
+        letter-spacing: .02em;
+    }
+
+    body.adminHomeDashboard .grid {
+        grid-template-columns: minmax(0, 1fr) 280px;
+        gap: 16px;
+        margin-top: 0;
+        align-items: start;
+    }
+
+    body.adminHomeDashboard .rightCol {
+        position: sticky;
+        top: 18px;
+        gap: 14px;
+    }
+
+    body.adminHomeDashboard .cardHead {
+        border-bottom: 0;
+        padding: 10px 0 12px;
+        background: transparent;
+    }
+
+    body.adminHomeDashboard .cardHeadTitle {
+        font-size: 16px;
+    }
+
+    body.adminHomeDashboard .kpiFilters select,
+    body.adminHomeDashboard .kpiFilters button {
+        height: 36px;
+        border-radius: 10px;
+    }
+
+    body.adminHomeDashboard .cardInner {
+        padding: 0;
+    }
+
+    body.adminHomeDashboard .kpiGrid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    body.adminHomeDashboard .kpiCard {
+        min-height: 154px;
+        padding: 20px 18px;
+        border-radius: 14px;
+    }
+
+    body.adminHomeDashboard .kpiCard:nth-child(1) { order: 4; }
+    body.adminHomeDashboard .kpiCard:nth-child(2) { order: 1; }
+    body.adminHomeDashboard .kpiCard:nth-child(3) { order: 3; }
+    body.adminHomeDashboard .kpiCard:nth-child(4) { order: 5; }
+    body.adminHomeDashboard .kpiCard:nth-child(5) { order: 6; }
+    body.adminHomeDashboard .kpiCard:nth-child(6) { order: 2; }
+
+    body.adminHomeDashboard .kpiCard:nth-child(2),
+    body.adminHomeDashboard .kpiCard:nth-child(4),
+    body.adminHomeDashboard .kpiCard:nth-child(5),
+    body.adminHomeDashboard .kpiCard:nth-child(6) {
+        grid-column: auto;
+    }
+
+    body.adminHomeDashboard .kpiCard:nth-child(2),
+    body.adminHomeDashboard .kpiCard:nth-child(6) {
+        grid-column: span 2;
+        min-height: 128px;
+    }
+
+    body.adminHomeDashboard .kpiWideInner {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(150px, 210px);
+        gap: 18px;
+        align-items: center;
+        height: 100%;
+        position: relative;
+        z-index: 1;
+    }
+
+    body.adminHomeDashboard .kpiWideMain {
+        min-width: 0;
+    }
+
+    body.adminHomeDashboard .kpiWideInner .kpiCompareStack {
+        width: 100%;
+        margin-top: 0;
+        align-self: center;
+    }
+
+    body.adminHomeDashboard .kpiLabel {
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+
+    body.adminHomeDashboard .kpiValue {
+        font-size: clamp(28px, 3.1vw, 40px);
+    }
+
+    body.adminHomeDashboard .kpiSub {
+        font-size: 12px;
+        margin-top: 10px;
+    }
+
+    body.adminHomeDashboard .metaLine {
+        margin: 14px 0 0;
+        padding: 14px 18px;
+        border: 1px solid rgba(148, 163, 184, .18);
+        border-radius: 14px;
+        background: rgba(15, 20, 31, .62);
+    }
+
+    body.adminHomeDashboard .tableCard,
+    body.adminHomeDashboard #dailyTable {
+        border: 1px solid rgba(148, 163, 184, .18);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(18, 24, 38, .88), rgba(11, 17, 29, .88));
+        overflow: hidden;
+    }
+
+    body.adminHomeDashboard .chartWrap {
+        min-height: 300px;
+        padding: 10px 18px 18px;
+    }
+
+    body.adminHomeDashboard .filtersBar {
+        padding: 18px;
+    }
+
+    body.adminHomeDashboard .tableWrap {
+        padding: 0 18px 18px;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) {
+        background: #ffffff;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .topRow::before {
+        color: #111827;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .metaLine {
+        margin-top: 10px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: #6b7280;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .tableCard,
+    body.adminHomeDashboard:not(.adminHomeDark) #dailyTable {
+        border: 1px solid rgba(0, 0, 0, .12);
+        background: #ffffff;
+        box-shadow: none;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) details.chartAcc summary,
+    body.adminHomeDashboard:not(.adminHomeDark) .filtersBar,
+    body.adminHomeDashboard:not(.adminHomeDark) .table thead,
+    body.adminHomeDashboard:not(.adminHomeDark) .table thead th {
+        background: #ffffff;
+        color: #111827;
+        border-color: rgba(0, 0, 0, .06);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .chartWrap {
+        background: #ffffff;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .tableWrap {
+        background: #ffffff;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .table,
+    body.adminHomeDashboard:not(.adminHomeDark) .table th,
+    body.adminHomeDashboard:not(.adminHomeDark) .table td {
+        color: #111827;
+        border-color: rgba(0, 0, 0, .06);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .table tbody tr:hover td {
+        background: #f8fafc;
+    }
+
+    body.adminHomeDashboard .aiSidePanel {
+        display: block !important;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .card,
+    body.adminHomeDashboard.aiConsultMode .tabPanel[data-panel="ai"] .card {
+        border-color: var(--accentBorder);
+        box-shadow: 0 18px 46px var(--accentSoft);
+    }
+
+    body.adminHomeDashboard .aiSidePanel .cardHead {
+        padding: 18px 18px 6px;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .cardHeadTitle {
+        font-size: 18px;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .cardHead::after {
+        content: "AI";
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 36px;
+        border-radius: 10px;
+        color: #fff;
+        font-size: 18px;
+        font-weight: 1000;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        box-shadow: 0 0 26px var(--accentSoft);
+    }
+
+    body.adminHomeDashboard .aiSidePanel .pill {
+        display: none;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .aiCta {
+        padding: 12px 18px 18px;
+        display: grid;
+        gap: 12px;
+    }
+
+    body.adminHomeDashboard .aiSideIntro {
+        color: #d7def0;
+        font-size: 13px;
+        line-height: 1.9;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .aiSidePanel .cardHead::after {
+        background: #111827;
+        color: #ffffff;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, .16);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .aiSideIntro {
+        color: #334155;
+        font-weight: 800;
+    }
+
+    body.adminHomeDashboard .aiSideLink {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 42px;
+        margin-top: 8px;
+        border-radius: 12px;
+        border: 1px solid var(--accentBorder);
+        color: #fff;
+        background: linear-gradient(135deg, rgba(var(--accent-rgb), .34), rgba(var(--accent-2-rgb), .15));
+        text-decoration: none;
+        font-weight: 900;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .aiBtn {
+        min-height: 46px;
+        padding: 12px 14px;
+        font-size: 14px;
+        border-radius: 12px !important;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .aiBtnHint {
+        display: none;
+    }
+
+    body.adminHomeDashboard .aiSidePanel .aiBox {
+        max-height: min(58vh, 560px);
+        overflow: auto;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .grid {
+        grid-template-columns: minmax(0, 1fr) 280px;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .tabPanel[data-panel="dash"] {
+        display: none;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .rightCol {
+        display: grid;
+        position: sticky;
+        top: 18px;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .aiSidePanel {
+        display: none !important;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .leftCol {
+        max-width: none;
+        width: 100%;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .tabsBar {
+        display: block;
+        position: static;
+        margin-left: 230px;
+        background: transparent;
+        box-shadow: none;
+        border-bottom: 0;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .tabsBar .page {
+        margin-left: 0;
+        padding: 0 28px 4px;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .tabs {
+        display: flex;
+        max-width: 980px;
+    }
+
+    body.adminHomeDashboard.aiConsultMode .topRow::before {
+        content: "AI（相談・チャット）";
+    }
+
+    body.adminHomeDashboard .helpBox .cardHead {
+        padding: 16px 18px 8px;
+    }
+
+    body.adminHomeDashboard .helpBox .cardHeadTitle {
+        font-size: 16px;
+    }
+
+    body.adminHomeDashboard .helpBody {
+        padding: 10px 18px 18px;
+        display: grid;
+        gap: 8px;
+    }
+
+    body.adminHomeDashboard .helpBody details {
+        margin: 0;
+        border-radius: 10px;
+    }
+
+    body.adminHomeDashboard .helpBody summary {
+        min-height: 42px;
+        padding: 0 12px;
+        font-size: 13px;
+    }
+
+    body.adminHomeDashboard .helpList {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    @media (max-width: 1180px) {
+        body.adminHomeDashboard .grid {
+            grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .rightCol {
+            position: static;
+        }
+    }
+
+    @media (max-width: 900px) {
+        body.adminHomeDashboard .azHd {
+            position: sticky;
+            width: auto;
+            height: auto;
+        }
+
+        body.adminHomeDashboard .topRow .azHdRight {
+            position: static !important;
+            top: auto !important;
+            right: auto !important;
+            left: auto !important;
+            width: auto;
+            max-width: 100%;
+            margin-left: auto;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        body.adminHomeDashboard .azNoticeMenu,
+        body.adminHomeDashboard .azStore,
+        body.adminHomeDashboard .azUserMenu,
+        body.adminHomeDashboard .azNoticeBtn,
+        body.adminHomeDashboard .azUserBtn,
+        body.adminHomeDashboard .azStore select {
+            width: auto;
+        }
+
+        body.adminHomeDashboard .azStore {
+            display: flex;
+        }
+
+        body.adminHomeDashboard .page {
+            margin-left: 0;
+            padding: 14px;
+        }
+
+        body.adminHomeDashboard.aiConsultMode .tabsBar {
+            margin-left: 0;
+        }
+
+        body.adminHomeDashboard.aiConsultMode .tabsBar .page {
+            padding: 0 14px 4px;
+        }
+
+        body.adminHomeDashboard .kpiGrid {
+            grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .kpiCard:nth-child(4),
+        body.adminHomeDashboard .kpiCard:nth-child(5),
+        body.adminHomeDashboard .kpiCard:nth-child(6) {
+            grid-column: auto;
+        }
+
+        body.adminHomeDashboard .kpiCard:nth-child(2) {
+            grid-column: auto;
+        }
+
+        body.adminHomeDashboard .kpiWideInner {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        body.adminHomeDashboard .kpiWideInner .kpiCompareStack {
+            margin-top: 2px;
+        }
+    }
     </style>
 </head>
 
-<body>
+<body class="<?= h(trim($adminThemeBodyClass . ' adminHomeDashboard')) ?>">
     <?php require_once __DIR__ . '/_header.php'; ?>
 
     <div class="tabsBar">
@@ -2239,17 +3180,35 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                 </div>
 
                                 <div class="kpiCard">
-                                    <div class="kpiLabel">売上</div>
-                                    <div class="kpiValue">
-                                        <?= number_format((int)$salesMonth) ?><span class="kpiUnit">円</span>
-                                    </div>
-                                    <div class="kpiSub">平均：<?= number_format($salesAvgPerDay) ?>円/日</div>
-                                    <details class="kpiDetail">
-                                        <summary class="kpiDetailSummary">詳細</summary>
-                                        <div class="kpiDetailBody">
-                                            <a href="/admin/sales_import.php?store_id=<?= (int)$storeId ?>" style="color:inherit;text-decoration:underline;">売上CSV取り込み</a>
+                                    <div class="kpiWideInner">
+                                        <div class="kpiWideMain">
+                                            <div class="kpiLabel">売上</div>
+                                            <div class="kpiValue">
+                                                <?= number_format((int)$salesMonth) ?><span class="kpiUnit">円</span>
+                                            </div>
+                                            <div class="kpiSub">平均：<?= number_format($salesAvgPerDay) ?>円/日</div>
+                                            <details class="kpiDetail">
+                                                <summary class="kpiDetailSummary">詳細</summary>
+                                                <div class="kpiDetailBody">
+                                                    <a href="/admin/sales_import.php?store_id=<?= (int)$storeId ?>" style="color:inherit;text-decoration:underline;">売上CSV取り込み</a>
+                                                </div>
+                                            </details>
                                         </div>
-                                    </details>
+                                        <div class="kpiCompareStack" aria-label="売上比較">
+                                            <div class="kpiCompareRow">
+                                                <span class="kpiCompareLabel">前日比</span>
+                                                <span class="kpiCompareValue <?= h(kpi_delta_class($salesPrevDayDiff)) ?>">
+                                                    <?= h(kpi_delta_text($salesPrevDayDiff, '円')) ?>
+                                                </span>
+                                            </div>
+                                            <div class="kpiCompareRow">
+                                                <span class="kpiCompareLabel">前月比</span>
+                                                <span class="kpiCompareValue <?= h(kpi_delta_class($salesPrevMonthDiff)) ?>">
+                                                    <?= h(kpi_delta_text($salesPrevMonthDiff, '円')) ?>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div class="kpiCard">
@@ -2343,26 +3302,44 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                 </div>
 
                                 <div class="kpiCard">
-                                    <div class="kpiLabel">来客数</div>
-                                    <div class="kpiValue">
-                                        <?php if ($customersDaysMonth > 0): ?>
-                                        <?= number_format($customersMonth) ?><span class="kpiUnit">人</span>
-                                        <?php else: ?>
-                                        -<span class="kpiUnit"></span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="kpiSub">
-                                        平均：
-                                        <?php if ($customersAvgPerDay !== null): ?>
-                                        <?= number_format($customersAvgPerDay) ?>人/日
-                                        <?php else: ?>
-                                        -
-                                        <?php endif; ?>
-                                        <?php if ($avgTicketMonth !== null): ?>
-                                        / 客単価 <?= number_format($avgTicketMonth) ?>円
-                                        <?php else: ?>
-                                        / 客単価 -
-                                        <?php endif; ?>
+                                    <div class="kpiWideInner">
+                                        <div class="kpiWideMain">
+                                            <div class="kpiLabel">来客数</div>
+                                            <div class="kpiValue">
+                                                <?php if ($customersDaysMonth > 0): ?>
+                                                <?= number_format($customersMonth) ?><span class="kpiUnit">人</span>
+                                                <?php else: ?>
+                                                -<span class="kpiUnit"></span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="kpiSub">
+                                                平均：
+                                                <?php if ($customersAvgPerDay !== null): ?>
+                                                <?= number_format($customersAvgPerDay) ?>人/日
+                                                <?php else: ?>
+                                                -
+                                                <?php endif; ?>
+                                                <?php if ($avgTicketMonth !== null): ?>
+                                                / 客単価 <?= number_format($avgTicketMonth) ?>円
+                                                <?php else: ?>
+                                                / 客単価 -
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        <div class="kpiCompareStack" aria-label="来客数比較">
+                                            <div class="kpiCompareRow">
+                                                <span class="kpiCompareLabel">前日比</span>
+                                                <span class="kpiCompareValue <?= h(kpi_delta_class($customersPrevDayDiff)) ?>">
+                                                    <?= h(kpi_delta_text($customersPrevDayDiff, '人')) ?>
+                                                </span>
+                                            </div>
+                                            <div class="kpiCompareRow">
+                                                <span class="kpiCompareLabel">前月比</span>
+                                                <span class="kpiCompareValue <?= h(kpi_delta_class($customersPrevMonthDiff)) ?>">
+                                                    <?= h(kpi_delta_text($customersPrevMonthDiff, '人')) ?>
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -2405,10 +3382,10 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                             </div>
                             <div class="chartWrap">
                                 <div class="chartPanel" data-chart-panel="rate">
-                                    <?= svg_rate_chart_30days($dates30, $salesMap30, $laborMap30, (float)$greenMax, (float)$yellowMax) ?>
+                                    <?= svg_rate_chart_30days($dates30, $salesMap30, $laborMap30, (float)$greenMax, (float)$yellowMax, $adminThemeChartPalette) ?>
                                 </div>
                                 <div class="chartPanel is-hidden" data-chart-panel="all">
-                                    <?= svg_line_chart_30days($dates30, $salesMap30, $laborMap30) ?>
+                                    <?= svg_line_chart_30days($dates30, $salesMap30, $laborMap30, $adminThemeChartPalette) ?>
                                 </div>
                             </div>
                         </details>
@@ -2779,6 +3756,59 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         </div>
 
         <script>
+        (function setupHomeDashboardLayout() {
+            const rightCol = document.querySelector('.rightCol');
+            const aiPanel = document.querySelector('.tabPanel[data-panel="ai"]');
+            if (rightCol && aiPanel && !rightCol.querySelector('.aiSidePanel')) {
+                const oldInsight = Array.from(rightCol.querySelectorAll('aside.card')).find((el) => !el.classList.contains('helpBox'));
+                const oldInsightBody = oldInsight ? oldInsight.querySelector('.actionCardBody > div') : null;
+                const oldInsightText = oldInsightBody ? oldInsightBody.textContent.trim() : '';
+                const sidePanel = document.createElement('aside');
+                sidePanel.className = 'aiSidePanel';
+                sidePanel.setAttribute('aria-label', 'AIインサイト');
+                sidePanel.innerHTML = `
+                    <div class="card">
+                        <div class="cardHead">
+                            <div class="cardHeadTitle">AIインサイト</div>
+                        </div>
+                        <div class="aiCta">
+                            <div class="aiSideIntro"></div>
+                        </div>
+                    </div>
+                `;
+                const intro = sidePanel.querySelector('.aiSideIntro');
+                if (intro) {
+                    intro.textContent = oldInsightText || '人件費率が高い状況です。売上予測のAI予測から、人員配置の見直しをおすすめします。';
+
+                    const link = document.createElement('a');
+                    link.className = 'aiSideLink';
+                    link.id = 'highLaborBtn';
+                    link.href = '#dailyTable';
+                    link.textContent = 'この日の内訳を見る';
+                    intro.appendChild(link);
+                }
+                rightCol.prepend(sidePanel);
+                if (oldInsight) oldInsight.remove();
+            }
+
+            const helpBox = document.querySelector('.helpBox');
+            if (helpBox) {
+                const title = helpBox.querySelector('.cardHeadTitle');
+                if (title) title.textContent = 'クイックメニュー';
+                helpBox.setAttribute('aria-label', 'クイックメニュー');
+                const summaries = helpBox.querySelectorAll('summary');
+                const labels = ['KPIの定義', '売上 / 人件費', 'AIの使い方'];
+                summaries.forEach((summary, index) => {
+                    summary.textContent = labels[index] || summary.textContent;
+                    const arrow = document.createElement('span');
+                    arrow.className = 'chev';
+                    arrow.setAttribute('aria-hidden', 'true');
+                    arrow.textContent = '›';
+                    summary.appendChild(arrow);
+                });
+            }
+        })();
+
         (function() {
             const btns = document.querySelectorAll('.chartBtn');
             const panels = document.querySelectorAll('[data-chart-panel]');
@@ -2991,6 +4021,9 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         async function loadAiInsights() {
             // ✅ AIタブへ移動（UIだけ）
             try {
+                if (document.body.classList.contains('adminHomeDashboard')) {
+                    document.body.classList.add('aiConsultMode');
+                }
                 uiTabsOpen('ai');
             } catch (e) {}
 
@@ -3014,7 +4047,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 }
 
                 const json = await res.json();
-                if (!json.ok) throw new Error(json.error || 'unknown error');
+                if (!json.ok) throw new Error(json.message || json.error || 'unknown error');
 
                 setStatus(`AI改善案（${json.from}〜${json.to} / 平均人件費率 ${json.rate_avg ?? '-'}%）`, false);
                 el('aiText').innerHTML = formatAiAnswer(json.insights || '(テキストが空でした)');
@@ -3158,7 +4191,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 }
 
                 const json = await res.json();
-                if (!json.ok) throw new Error(json.error || 'unknown error');
+                if (!json.ok) throw new Error(json.message || json.error || 'unknown error');
 
                 appendFollowupTurn(q, json.answer || '');
                 el('aiAskInput').value = '';
@@ -3220,7 +4253,34 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             }
         }
 
+        window.openAiConsultation = function openAiConsultation() {
+            document.body.classList.add('aiConsultMode');
+            uiTabsOpen('ai');
+            const aiPanel = document.querySelector('.tabPanel[data-panel="ai"]');
+            if (aiPanel) {
+                aiPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
         (function initTabs() {
+            if (document.body.classList.contains('adminHomeDashboard')) {
+                const tabs = Array.from(document.querySelectorAll('.tabBtn[data-tab]'));
+                tabs.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-tab');
+                        if (!id) return;
+                        document.body.classList.toggle('aiConsultMode', id === 'ai');
+                        uiTabsOpen(id);
+                        window.scrollTo({
+                            top: 0,
+                            behavior: 'smooth'
+                        });
+                    });
+                });
+                uiTabsOpen('dash');
+                return;
+            }
+
             const tabs = Array.from(document.querySelectorAll('.tabBtn[data-tab]'));
             if (!tabs.length) return;
 
@@ -3247,6 +4307,17 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             } else {
                 uiTabsOpen('dash');
         }
+    })();
+
+    (function openAiFromQuery() {
+        if (!document.body.classList.contains('adminHomeDashboard')) return;
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('open_ai') !== '1') return;
+        window.setTimeout(() => {
+            if (typeof window.openAiConsultation === 'function') {
+                window.openAiConsultation();
+            }
+        }, 0);
     })();
 
     (function() {

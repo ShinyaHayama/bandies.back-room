@@ -1327,38 +1327,44 @@ $tenantLabel = ($tenantName !== '')
     /* ✅ 添付の雰囲気に寄せた「タブ」 */
     .tabsBar {
         display: flex;
-        align-items: flex-end;
+        align-items: center;
         gap: 10px;
-        padding: 10px 10px 0;
-        background: #e9eef1;
-        border: 1px solid #e5e7eb;
-        border-bottom: none;
+        flex-wrap: wrap;
+        padding: 0;
+        margin-bottom: 16px;
+        background: transparent;
+        border: none;
+        overflow: visible;
     }
 
     .tabBtn {
         appearance: none;
         border: 1px solid #d0d7de;
-        border-bottom: none;
-        border-radius: 0;
-        padding: 14px 28px;
-        font-size: 14px;
+        border-radius: 999px;
+        min-height: 44px;
+        padding: 0 18px;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
         font-weight: 900;
         line-height: 1;
-        background: #6f899b;
-        color: #fff;
+        background: #fff;
+        color: #0f172a;
         cursor: pointer;
         text-decoration: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        min-width: 150px;
+        min-width: 132px;
+        white-space: nowrap;
+        transition: background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
     }
 
     .tabBtn.isActive {
-        background: #fff;
-        color: #0f172a;
-        border-color: #d0d7de;
+        background: linear-gradient(135deg, #365EAB, #4b74c2);
+        color: #fff;
+        border-color: rgba(54, 94, 171, .32);
+        box-shadow: 0 10px 24px rgba(54, 94, 171, .18);
     }
 
     .tabBtn:focus {
@@ -1370,6 +1376,7 @@ $tenantLabel = ($tenantName !== '')
         border: 1px solid #e5e7eb;
         background: #fff;
         padding: 14px;
+        border-radius: 16px;
     }
 
     .tabPanel {
@@ -1688,7 +1695,7 @@ $tenantLabel = ($tenantName !== '')
             <?php endif; ?>
 
             <!-- ✅ タブ -->
-            <div class="tabsBar" role="tablist" aria-label="従業員管理タブ">
+            <div class="tabsBar" role="tablist" aria-label="設定">
                 <button type="button" class="tabBtn" data-tab="list" role="tab"
                     aria-selected="false">従業員設定</button>
                 <button type="button" class="tabBtn" data-tab="add" role="tab" aria-selected="false">従業員追加</button>
@@ -1696,14 +1703,9 @@ $tenantLabel = ($tenantName !== '')
                 <button type="button" class="tabBtn" data-tab="store" role="tab" aria-selected="false">店舗追加</button>
                 <button type="button" class="tabBtn" data-tab="labor" role="tab"
                     aria-selected="false">人件費率設定</button>
-                <a class="tabBtn" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>" role="tab"
-                    aria-selected="false">
-                    経費
-                </a>
-                <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>" role="tab"
-                    aria-selected="false">
-                    端末管理
-                </a>
+                <a class="tabBtn" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">経費</a>
+                <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">端末管理</a>
+                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">色変更</a>
             </div>
 
             <div class="tabWrap">

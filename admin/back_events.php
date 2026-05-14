@@ -1843,7 +1843,7 @@ $histAllYenTotal = $histAllYenConfirmed + $histAllYenDraft;
     </style>
 </head>
 
-<body>
+<body class="backEventsPage">
     <?php require_once __DIR__ . '/_header.php'; ?>
 
     <div class="pageWrap">
