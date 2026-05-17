@@ -7,16 +7,15 @@ declare(strict_types=1);
  * ✅ 書き込み場所: 既存の /admin/index.php を「丸ごと置き換え」
  *
  * ✅ 今回の修正（あなたの要望）
- * - 「直近30日」固定だった一覧を、プルダウンで切り替え可能にする
- *   1) 一番上：直近30日
- *   2) その下：過去12ヶ月（YYYY年MM度）
+ * - 一覧を月単位（YYYY年MM度）のプルダウンで切り替え可能にする
+ * - 初期表示は当月
  * - KPI/テーブル/チャートの期間を、選択した期間に揃える
- * - 15分打刻調整（round15）と store_id も維持
+ * - 打刻調整は店舗設定の値を使用し、store_id も維持
  *
  * ✅ 既存の仕様維持
  * - 売上/客数は daily_store_reports の reported_at がある場合のみ cutoff で表示日補正
  * - created_at/updated_at は dt_key に使わない（深夜保存で行がズレる原因）
- * - AI 用の従業員サマリーは「直近30日固定」のまま（影響範囲を最小化）
+ * - AI 用の従業員サマリーは表示中の期間に合わせる
  *
  * ✅ 今回の追加（あなたの依頼）
  * - 「AIに改善案を聞く」ボタンとチャットの見た目だけを “小学生でも分かる” デザインに変更
@@ -230,6 +229,22 @@ if (!$businessNow) {
 // ✅ ただし「大元の打刻調整がOFF」の場合は、UIも出さず、強制OFFにする
 function detect_round_feature_enabled(PDO $pdo, int $tenantId, int $storeId): bool
 {
+    if (has_column($pdo, 'stores', 'payroll_round_unit_minutes')) {
+        try {
+            $st = $pdo->prepare("
+                SELECT COALESCE(payroll_round_unit_minutes, 15) AS v
+                FROM stores
+                WHERE tenant_id = :t AND id = :s
+                LIMIT 1
+            ");
+            $st->execute([':t' => $tenantId, ':s' => $storeId]);
+            $v = $st->fetchColumn();
+            return ((int)$v > 0);
+        } catch (Throwable $e) {
+            return true;
+        }
+    }
+
     $candidates = [
         'labor_round15_enabled',
         'round15_enabled',
@@ -264,62 +279,58 @@ function detect_round_feature_enabled(PDO $pdo, int $tenantId, int $storeId): bo
     }
 }
 
-$roundFeatureEnabled = detect_round_feature_enabled($pdo, $tenantId, $storeId);
-$roundOn = ($roundFeatureEnabled && ((int)($_GET['round15'] ?? 1) === 1));
+$roundOn = detect_round_feature_enabled($pdo, $tenantId, $storeId);
+
+function valid_ymd_param(string $ymd): bool
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $ymd)) return false;
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $ymd);
+    return $dt instanceof DateTimeImmutable && $dt->format('Y-m-d') === $ymd;
+}
 
 // =========================================================
 // ✅ 表示期間（プルダウン）
-// - period=30d（デフォルト）: 直近30日
 // - period=ym:YYYY-MM       : 指定月（過去12ヶ月）
+// - デフォルト              : 当月
 // =========================================================
-$periodParam = (string)($_GET['period'] ?? '30d');
+$selectedKpiDate = (string)($_GET['kpi_date'] ?? '');
+$defaultPeriodParam = 'ym:' . substr($businessToday, 0, 7);
+$periodParam = (string)($_GET['period'] ?? $defaultPeriodParam);
 
-// 選択肢（先頭=直近30日、以下=過去12ヶ月）
+// 選択肢（月単位のみ）
 $periodOptions = [];
-$periodOptions[] = ['value' => '30d', 'label' => '直近30日'];
-$periodOptions[] = ['value' => '90d', 'label' => '過去90日'];
-$periodOptions[] = ['value' => '180d', 'label' => '過去180日'];
-$periodOptions[] = ['value' => '365d', 'label' => '過去1年'];
 
 for ($i = 0; $i < 12; $i++) {
-    $dt = $now->modify("-{$i} month");
+    $dt = $businessNow->modify("-{$i} month");
     $ym = $dt->format('Y-m');
     $label = $dt->format('Y年m月') . '度';
     $periodOptions[] = ['value' => "ym:{$ym}", 'label' => $label];
 }
 
-// 妥当化（未知の値は 30d）
+// 妥当化（未知の値は当月）
 $validValues = array_column($periodOptions, 'value');
 if (!in_array($periodParam, $validValues, true)) {
-    $periodParam = '30d';
+    $periodParam = $defaultPeriodParam;
 }
 
 $periodStart = '';
 $periodEnd   = '';
 $periodTitle = '';
 
-if ($periodParam === '30d' || $periodParam === '90d' || $periodParam === '180d' || $periodParam === '365d') {
-    $days = (int)str_replace('d', '', $periodParam);
-    $days = ($days > 0) ? $days : 30;
-    $periodStart = $businessNow->modify('-' . ($days - 1) . ' days')->format('Y-m-d');
-    $periodEnd   = $businessToday;
-    $periodTitle = ($periodParam === '30d') ? '直近30日'
-        : (($periodParam === '90d') ? '過去90日'
-        : (($periodParam === '180d') ? '過去180日' : '過去1年'));
-} else {
-    $ym = substr($periodParam, 3); // "ym:YYYY-MM" -> YYYY-MM
-    if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $now->format('Y-m');
+$ym = substr($periodParam, 3); // "ym:YYYY-MM" -> YYYY-MM
+if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = substr($businessToday, 0, 7);
 
-    $dtFirst = DateTimeImmutable::createFromFormat('Y-m-d', $ym . '-01', new DateTimeZone($tz));
-    if (!$dtFirst) $dtFirst = new DateTimeImmutable('first day of this month', new DateTimeZone($tz));
+$dtFirst = DateTimeImmutable::createFromFormat('Y-m-d', $ym . '-01', new DateTimeZone($tz));
+if (!$dtFirst) $dtFirst = new DateTimeImmutable('first day of this month', new DateTimeZone($tz));
 
-    $periodStart = $dtFirst->format('Y-m-d');
-    $periodEnd   = $dtFirst->modify('last day of this month')->format('Y-m-d');
-    if ($dtFirst->format('Y-m') === substr($businessToday, 0, 7) && $periodEnd > $businessToday) {
-        $periodEnd = $businessToday;
-    }
-    $periodTitle = $dtFirst->format('Y年m月') . '度';
+$periodStart = $dtFirst->format('Y-m-d');
+$periodEnd   = $dtFirst->modify('last day of this month')->format('Y-m-d');
+if ($dtFirst->format('Y-m') === substr($businessToday, 0, 7) && $periodEnd > $businessToday) {
+    $periodEnd = $businessToday;
 }
+$periodTitle = $dtFirst->format('Y年m月') . '度';
+
+$kpiDateInputValue = valid_ymd_param($selectedKpiDate) ? $selectedKpiDate : $businessToday;
 
 // =========================================================
 // labor_mvp.php
@@ -643,6 +654,22 @@ function kpi_delta_text(?int $delta, string $unit): string
     return $prefix . number_format(abs($delta)) . $unit;
 }
 
+function kpi_delta_value_class(?float $delta, bool $increaseIsBad = false): string
+{
+    if ($delta === null || abs($delta) < 0.0001) return 'isFlat';
+    if ($increaseIsBad) {
+        return ($delta > 0) ? 'isDown' : 'isUp';
+    }
+    return ($delta > 0) ? 'isUp' : 'isDown';
+}
+
+function kpi_delta_float_text(?float $delta, string $unit, int $decimals = 1): string
+{
+    if ($delta === null) return '-';
+    $prefix = ($delta > 0) ? '+' : (($delta < 0) ? '-' : '±');
+    return $prefix . number_format(abs($delta), $decimals) . $unit;
+}
+
 // =========================================================
 // ✅ KPI：表示期間（$periodStart〜$periodEnd）で算出
 // =========================================================
@@ -691,6 +718,9 @@ if ($comparePrevMonthEndDt > $comparePrevMonthLastDt) {
 $comparePrevMonthStart = $comparePrevMonthStartDt->format('Y-m-d');
 $comparePrevMonthEnd = $comparePrevMonthEndDt->format('Y-m-d');
 
+$compareCurrentDates = ymd_range($compareMonthStart, $compareDate, $tz);
+$comparePrevMonthDates = ymd_range($comparePrevMonthStart, $comparePrevMonthEnd, $tz);
+
 $salesCompareMap = sales_map_with_customers($pdo, $tenantId, $storeId, $comparePrevMonthStart, $compareDate, $tz, $cutoffTime);
 $customersCompareAvailable = ($customersDaysMonth > 0 || sales_map_has_customers($salesCompareMap));
 
@@ -699,13 +729,20 @@ $customersPrevDayDiff = $customersCompareAvailable
     ? ((int)($salesCompareMap[$compareDate]['customers'] ?? 0) - (int)($salesCompareMap[$comparePrevDay]['customers'] ?? 0))
     : null;
 
-$compareCurrentTotals = sales_customer_totals_for_dates(ymd_range($compareMonthStart, $compareDate, $tz), $salesCompareMap, $customersCompareAvailable);
-$comparePrevMonthTotals = sales_customer_totals_for_dates(ymd_range($comparePrevMonthStart, $comparePrevMonthEnd, $tz), $salesCompareMap, $customersCompareAvailable);
+$compareCurrentTotals = sales_customer_totals_for_dates($compareCurrentDates, $salesCompareMap, $customersCompareAvailable);
+$comparePrevMonthTotals = sales_customer_totals_for_dates($comparePrevMonthDates, $salesCompareMap, $customersCompareAvailable);
 
 $salesPrevMonthDiff = (int)$compareCurrentTotals['sales'] - (int)$comparePrevMonthTotals['sales'];
 $customersPrevMonthDiff = $customersCompareAvailable
     ? ((int)$compareCurrentTotals['customers'] - (int)$comparePrevMonthTotals['customers'])
     : null;
+
+$laborCompareDetail = mvp_daily_labor_detail($pdo, $tenantId, $storeId, $comparePrevMonthStart, $compareDate, $roundOn);
+$laborComparePeriod = $laborCompareDetail['total'] ?? [];
+$compareCurrentMetrics = monthly_metrics_excluding_holidays($compareCurrentDates, $salesCompareMap, $laborComparePeriod);
+$comparePrevMonthMetrics = monthly_metrics_excluding_holidays($comparePrevMonthDates, $salesCompareMap, $laborComparePeriod);
+$laborPrevMonthDiff = (int)$compareCurrentMetrics['labor_sum'] - (int)$comparePrevMonthMetrics['labor_sum'];
+$ratePrevMonthDiff = round((float)$compareCurrentMetrics['rate'] - (float)$comparePrevMonthMetrics['rate'], 1);
 
 $expenseSummary = store_expenses_summary($pdo, $tenantId, $storeId, $periodStart, $periodEnd);
 $expenseHasSettings = (bool)($expenseSummary['has_settings'] ?? false);
@@ -716,6 +753,17 @@ $expenseFixedItems = is_array($expenseSummary['fixed_items'] ?? null) ? $expense
 $expenseMonthlyItems = is_array($expenseSummary['monthly_items'] ?? null) ? $expenseSummary['monthly_items'] : [];
 $estimatedProfit = $salesMonth - $laborMonth - $expenseMonth;
 $estimatedProfitRate = ($salesMonth > 0) ? ($estimatedProfit / $salesMonth * 100.0) : null;
+
+$expenseCompareCurrentSummary = store_expenses_summary($pdo, $tenantId, $storeId, $compareMonthStart, $compareDate);
+$expenseComparePrevMonthSummary = store_expenses_summary($pdo, $tenantId, $storeId, $comparePrevMonthStart, $comparePrevMonthEnd);
+$expensePrevMonthDiff = $expenseHasSettings
+    ? ((int)($expenseCompareCurrentSummary['total'] ?? 0) - (int)($expenseComparePrevMonthSummary['total'] ?? 0))
+    : null;
+$estimatedProfitCompareCurrent = (int)$compareCurrentMetrics['sales_sum'] - (int)$compareCurrentMetrics['labor_sum'] - (int)($expenseCompareCurrentSummary['total'] ?? 0);
+$estimatedProfitComparePrevMonth = (int)$comparePrevMonthMetrics['sales_sum'] - (int)$comparePrevMonthMetrics['labor_sum'] - (int)($expenseComparePrevMonthSummary['total'] ?? 0);
+$estimatedProfitPrevMonthDiff = $expenseHasSettings
+    ? ($estimatedProfitCompareCurrent - $estimatedProfitComparePrevMonth)
+    : null;
 
 // stores のしきい値
 $greenMax = 30.0;
@@ -753,11 +801,11 @@ $dates30Desc = $dates30;
 rsort($dates30Desc);
 
 // =========================================================
-// ✅ AI用：従業員サマリーは「直近30日固定」
+// ✅ AI用：表示中の期間に合わせる
 // =========================================================
 $employeeSummary30 = [];
-$aiFrom = $businessNow->modify('-29 days')->format('Y-m-d');
-$aiTo   = $businessToday;
+$aiFrom = $periodStart;
+$aiTo   = $periodEnd;
 try {
     $employeeSummary30 = employee_attendance_summary($pdo, $tenantId, $storeId, $aiFrom, $aiTo);
 } catch (Throwable $e) {
@@ -791,6 +839,151 @@ function badge_note(string $key, array $noteMap): string
 {
     return $noteMap[$key] ?? '';
 }
+
+$topKpiDate = $kpiDateInputValue;
+$topKpiDt = DateTimeImmutable::createFromFormat('!Y-m-d', $topKpiDate, new DateTimeZone($tz));
+if (!$topKpiDt) {
+    $topKpiDt = new DateTimeImmutable($businessToday, new DateTimeZone($tz));
+    $topKpiDate = $businessToday;
+}
+
+$topDates = [$topKpiDate];
+$topSalesMap = sales_map_with_customers($pdo, $tenantId, $storeId, $topKpiDate, $topKpiDate, $tz, $cutoffTime);
+$topLaborDetail = mvp_daily_labor_detail($pdo, $tenantId, $storeId, $topKpiDate, $topKpiDate, $roundOn);
+$topLaborDaily = $topLaborDetail['total'] ?? [];
+$topLaborNight = $topLaborDetail['night_premium'] ?? [];
+$topMm = monthly_metrics_excluding_holidays($topDates, $topSalesMap, $topLaborDaily);
+
+$topSales = (int)$topMm['sales_sum'];
+$topLabor = (int)$topMm['labor_sum'];
+$topLaborNightMonth = array_sum(array_map('intval', $topLaborNight));
+$topCustomers = (int)$topMm['customers_sum'];
+$topCustomersDays = (int)$topMm['customers_days'];
+$topRate = (float)$topMm['rate'];
+$topOpenDays = (int)$topMm['open_days'];
+$topAnomalyDays = $topMm['anomaly_days'];
+$topSalesAvg = ($topOpenDays > 0) ? (int)round($topSales / $topOpenDays) : 0;
+$topLaborAvg = ($topOpenDays > 0) ? (int)round($topLabor / $topOpenDays) : 0;
+$topCustomersAvg = ($topCustomersDays > 0) ? (int)round($topCustomers / $topCustomersDays) : null;
+$topAvgTicket = ($topCustomers > 0 && $topSales > 0) ? (int)floor($topSales / $topCustomers) : null;
+
+$topCompareDate = $topKpiDate;
+$topComparePrevDay = $topKpiDt->modify('-1 day')->format('Y-m-d');
+$topCompareMonthStart = $topKpiDt->modify('first day of this month')->format('Y-m-d');
+$topComparePrevMonthStartDt = $topKpiDt->modify('first day of previous month');
+$topComparePrevMonthLastDt = $topComparePrevMonthStartDt->modify('last day of this month');
+$topCompareDayOffset = max(0, (int)$topKpiDt->format('j') - 1);
+$topComparePrevMonthEndDt = $topComparePrevMonthStartDt->modify('+' . $topCompareDayOffset . ' days');
+if ($topComparePrevMonthEndDt > $topComparePrevMonthLastDt) {
+    $topComparePrevMonthEndDt = $topComparePrevMonthLastDt;
+}
+$topComparePrevMonthStart = $topComparePrevMonthStartDt->format('Y-m-d');
+$topComparePrevMonthEnd = $topComparePrevMonthEndDt->format('Y-m-d');
+$topCompareCurrentDates = ymd_range($topCompareMonthStart, $topCompareDate, $tz);
+$topComparePrevMonthDates = ymd_range($topComparePrevMonthStart, $topComparePrevMonthEnd, $tz);
+
+$topSalesCompareMap = sales_map_with_customers($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topCompareDate, $tz, $cutoffTime);
+$topCustomersCompareAvailable = ($topCustomersDays > 0 || sales_map_has_customers($topSalesCompareMap));
+$topSalesPrevDayDiff = (int)($topSalesCompareMap[$topCompareDate]['sales'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevDay]['sales'] ?? 0);
+$topCustomersPrevDayDiff = $topCustomersCompareAvailable
+    ? ((int)($topSalesCompareMap[$topCompareDate]['customers'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevDay]['customers'] ?? 0))
+    : null;
+$topCompareCurrentTotals = sales_customer_totals_for_dates($topCompareCurrentDates, $topSalesCompareMap, $topCustomersCompareAvailable);
+$topComparePrevMonthTotals = sales_customer_totals_for_dates($topComparePrevMonthDates, $topSalesCompareMap, $topCustomersCompareAvailable);
+$topSalesPrevMonthDiff = (int)$topCompareCurrentTotals['sales'] - (int)$topComparePrevMonthTotals['sales'];
+$topCustomersPrevMonthDiff = $topCustomersCompareAvailable
+    ? ((int)$topCompareCurrentTotals['customers'] - (int)$topComparePrevMonthTotals['customers'])
+    : null;
+
+$topLaborCompareDetail = mvp_daily_labor_detail($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topCompareDate, $roundOn);
+$topLaborComparePeriod = $topLaborCompareDetail['total'] ?? [];
+$topCompareCurrentMetrics = monthly_metrics_excluding_holidays($topCompareCurrentDates, $topSalesCompareMap, $topLaborComparePeriod);
+$topComparePrevMonthMetrics = monthly_metrics_excluding_holidays($topComparePrevMonthDates, $topSalesCompareMap, $topLaborComparePeriod);
+$topLaborPrevMonthDiff = (int)$topCompareCurrentMetrics['labor_sum'] - (int)$topComparePrevMonthMetrics['labor_sum'];
+$topRatePrevMonthDiff = round((float)$topCompareCurrentMetrics['rate'] - (float)$topComparePrevMonthMetrics['rate'], 1);
+
+$topExpenseSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topKpiDate, $topKpiDate);
+$topExpenseHasSettings = (bool)($topExpenseSummary['has_settings'] ?? false);
+$topFixedExpense = (int)($topExpenseSummary['fixed_total'] ?? 0);
+$topMonthlyExpense = (int)($topExpenseSummary['monthly_total'] ?? 0);
+$topExpense = (int)($topExpenseSummary['total'] ?? 0);
+$topEstimatedProfit = $topSales - $topLabor - $topExpense;
+$topEstimatedProfitRate = ($topSales > 0) ? ($topEstimatedProfit / $topSales * 100.0) : null;
+$topExpenseCompareCurrentSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topCompareMonthStart, $topCompareDate);
+$topExpenseComparePrevMonthSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topComparePrevMonthEnd);
+$topExpensePrevMonthDiff = $topExpenseHasSettings
+    ? ((int)($topExpenseCompareCurrentSummary['total'] ?? 0) - (int)($topExpenseComparePrevMonthSummary['total'] ?? 0))
+    : null;
+$topEstimatedProfitCompareCurrent = (int)$topCompareCurrentMetrics['sales_sum'] - (int)$topCompareCurrentMetrics['labor_sum'] - (int)($topExpenseCompareCurrentSummary['total'] ?? 0);
+$topEstimatedProfitComparePrevMonth = (int)$topComparePrevMonthMetrics['sales_sum'] - (int)$topComparePrevMonthMetrics['labor_sum'] - (int)($topExpenseComparePrevMonthSummary['total'] ?? 0);
+$topEstimatedProfitPrevMonthDiff = $topExpenseHasSettings
+    ? ($topEstimatedProfitCompareCurrent - $topEstimatedProfitComparePrevMonth)
+    : null;
+
+[$topColorKey, $topBadge] = labor_color_from_thresholds($topRate, $greenMax, $yellowMax);
+
+$topKpiPayload = [
+    'title' => '📊 店舗情報（' . $topKpiDt->format('Y年m月d日') . '）',
+    'cards' => [
+        '売上' => [
+            'valueHtml' => number_format($topSales) . '<span class="kpiUnit">円</span>',
+            'subHtml' => '平均：' . number_format($topSalesAvg) . '円/日',
+            'compares' => [
+                ['text' => kpi_delta_text($topSalesPrevDayDiff, '円'), 'className' => kpi_delta_class($topSalesPrevDayDiff)],
+                ['text' => kpi_delta_text($topSalesPrevMonthDiff, '円'), 'className' => kpi_delta_class($topSalesPrevMonthDiff)],
+            ],
+        ],
+        '来客数' => [
+            'valueHtml' => ($topCustomersDays > 0 ? number_format($topCustomers) : '-') . '<span class="kpiUnit">' . ($topCustomersDays > 0 ? '人' : '') . '</span>',
+            'subHtml' => '平均：' . ($topCustomersAvg !== null ? number_format($topCustomersAvg) . '人/日' : '-') .
+                ' / 客単価 ' . ($topAvgTicket !== null ? number_format($topAvgTicket) . '円' : '-'),
+            'compares' => [
+                ['text' => kpi_delta_text($topCustomersPrevDayDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevDayDiff)],
+                ['text' => kpi_delta_text($topCustomersPrevMonthDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevMonthDiff)],
+            ],
+        ],
+        '経費（日割）' => [
+            'valueHtml' => $topExpenseHasSettings ? number_format($topExpense) . '<span class="kpiUnit">円</span>' : '未設定',
+            'subHtml' => $topExpenseHasSettings
+                ? '固定：' . number_format($topFixedExpense) . '円 / 月別：' . number_format($topMonthlyExpense) . '円（期間按分）'
+                : '経費を登録すると利益を表示できます',
+            'compares' => [
+                ['text' => kpi_delta_text($topExpensePrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topExpensePrevMonthDiff !== null ? (float)$topExpensePrevMonthDiff : null, true)],
+            ],
+        ],
+        '推定利益' => [
+            'valueHtml' => $topExpenseHasSettings ? number_format($topEstimatedProfit) . '<span class="kpiUnit">円</span>' : '未計算',
+            'subHtml' => $topExpenseHasSettings
+                ? '利益率：' . ($topEstimatedProfitRate !== null ? number_format((float)$topEstimatedProfitRate, 1) . '%' : '-')
+                : '経費が未設定です',
+            'valueColor' => ($topExpenseHasSettings && $topEstimatedProfit < 0) ? '#b3261e' : '',
+            'badgeText' => $topExpenseHasSettings ? ($topEstimatedProfit < 0 ? '赤字' : '黒字') : '',
+            'badgeClass' => $topExpenseHasSettings ? ($topEstimatedProfit < 0 ? 'bg-danger' : 'bg-success') : '',
+            'compares' => [
+                ['text' => kpi_delta_text($topEstimatedProfitPrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topEstimatedProfitPrevMonthDiff !== null ? (float)$topEstimatedProfitPrevMonthDiff : null)],
+            ],
+        ],
+        '人件費' => [
+            'valueHtml' => number_format($topLabor) . '<span class="kpiUnit">円</span>',
+            'subHtml' => '平均：' . number_format($topLaborAvg) . '円/日' .
+                ($topLaborNightMonth > 0 ? ' <span class="sub deepNightSub">深割: +' . number_format((int)$topLaborNightMonth) . '</span>' : ''),
+            'compares' => [
+                ['text' => kpi_delta_text($topLaborPrevMonthDiff, '円'), 'className' => kpi_delta_value_class((float)$topLaborPrevMonthDiff, true)],
+            ],
+        ],
+        '人件費率' => [
+            'valueHtml' => number_format($topRate, 1) . '<span class="kpiUnit">%</span>',
+            'subHtml' => badge_note($topColorKey, $noteMap),
+            'badgeText' => badge_label($topColorKey, $labelMap),
+            'badgeClass' => 'bg-' . $topBadge,
+            'detailHtml' => '基準：適正 ≤ ' . number_format($greenMax, 2) . '% / 注意 ≤ ' . number_format($yellowMax, 2) . '%' .
+                (!empty($topAnomalyDays) ? '<br><span style="color:#b3261e;">未連携の疑いあり</span>' : ''),
+            'compares' => [
+                ['text' => kpi_delta_float_text((float)$topRatePrevMonthDiff, 'pt', 1), 'className' => kpi_delta_value_class((float)$topRatePrevMonthDiff, true)],
+            ],
+        ],
+    ],
+];
 
 function svg_line_chart_30days(array $dates, array $salesMap, array $laborMap, array $palette): string
 {
@@ -1490,6 +1683,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         font-weight: 900;
         color: var(--muted);
         line-height: 1.4;
+        overflow-wrap: anywhere;
     }
 
     .kpiMainBadge {
@@ -2450,6 +2644,23 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         pointer-events: none;
     }
 
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiCard {
+        position: relative;
+        overflow: hidden;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiCard::after {
+        content: "";
+        position: absolute;
+        right: -28px;
+        top: -28px;
+        width: 92px;
+        height: 92px;
+        border-radius: 999px;
+        background: radial-gradient(circle, var(--accentGlow), var(--accentSoft) 48%, transparent 70%);
+        pointer-events: none;
+    }
+
     body.adminHomeDark .chartWrap {
         background: radial-gradient(620px 240px at 52% 100%, var(--accentSoft), transparent 72%), transparent;
     }
@@ -2571,27 +2782,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         display: none;
     }
 
-    body.adminHomeDashboard .azHd .azHdRight {
-        display: none;
-    }
-
-    body.adminHomeDashboard .topRow .azHdRight {
-        display: flex;
-        position: static !important;
-        top: auto !important;
-        right: auto !important;
-        left: auto !important;
-        z-index: auto;
-        width: auto;
-        max-width: min(560px, 52vw);
-        min-width: 0;
-        margin: 0 0 0 auto;
-        flex-direction: row;
-        align-items: center;
-        justify-content: flex-end;
-        flex-wrap: nowrap;
-        gap: 10px;
-    }
+    /* Header actions are owned by admin/_header.php. */
 
     body.adminHomeDashboard .azNoticeMenu,
     body.adminHomeDashboard .azStore,
@@ -2644,16 +2835,13 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     }
 
     body.adminHomeDashboard .topRow {
-        min-height: 54px;
+        min-height: 0;
         margin-bottom: 8px;
     }
 
     body.adminHomeDashboard .topRow::before {
-        content: "ダッシュボード";
-        color: #f8fafc;
-        font-size: 24px;
-        font-weight: 1000;
-        letter-spacing: .02em;
+        content: none;
+        display: none;
     }
 
     body.adminHomeDashboard .grid {
@@ -2661,6 +2849,12 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         gap: 16px;
         margin-top: 0;
         align-items: start;
+    }
+
+    body.adminHomeDashboard .grid > *,
+    body.adminHomeDashboard .tabPanel,
+    body.adminHomeDashboard .chartPanel {
+        min-width: 0;
     }
 
     body.adminHomeDashboard .rightCol {
@@ -2685,19 +2879,183 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         border-radius: 10px;
     }
 
+    body.adminHomeDashboard .kpiDateFilters {
+        margin-left: auto;
+        flex-wrap: nowrap;
+    }
+
+    body.adminHomeDashboard .kpiDatePicker {
+        display: inline-flex;
+        align-items: center;
+        height: 36px;
+        border: 1px solid rgba(148, 163, 184, .24);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, .78);
+        overflow: hidden;
+    }
+
+    body.adminHomeDashboard .kpiDateCalendarBtn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 36px;
+        border: 0;
+        border-right: 1px solid rgba(148, 163, 184, .18);
+        background: transparent;
+        color: #f8fafc;
+        cursor: pointer;
+        font-size: 16px;
+    }
+
+    body.adminHomeDashboard .kpiDatePicker input[type="date"] {
+        width: 150px;
+        height: 36px;
+        border: 0;
+        background: transparent;
+        color: #f8fafc;
+        padding: 0 10px;
+        font-weight: 1000;
+        font-size: 12px;
+        color-scheme: dark;
+    }
+
+    body.adminHomeDashboard .kpiDateFilters button[type="submit"] {
+        height: 36px;
+        border-radius: 10px;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiDatePicker {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, .14);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiDateCalendarBtn {
+        color: #111827;
+        border-right-color: rgba(15, 23, 42, .10);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiDatePicker input[type="date"] {
+        color: #111827;
+        color-scheme: light;
+    }
+
     body.adminHomeDashboard .cardInner {
         padding: 0;
     }
 
     body.adminHomeDashboard .kpiGrid {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px;
+        align-items: start;
+    }
+
+    body.adminHomeDashboard .kpiGroup {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        align-items: start;
+        isolation: isolate;
+        min-width: 0;
+        padding: 16px;
+        border: 1px solid rgba(148, 163, 184, .28);
+        border-radius: 18px;
+        background:
+            linear-gradient(135deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 42%),
+            linear-gradient(180deg, rgba(22, 31, 49, .72), rgba(10, 15, 27, .64));
+        box-shadow:
+            0 22px 46px rgba(0, 0, 0, .24),
+            inset 0 1px 0 rgba(255, 255, 255, .08),
+            inset 0 -1px 0 rgba(2, 6, 23, .6);
+    }
+
+    body.adminHomeDashboard .kpiGroup::before {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        z-index: -1;
+        border-radius: 17px;
+        background:
+            radial-gradient(circle at 18px 18px, rgba(var(--accent-rgb), .18), transparent 28%),
+            linear-gradient(180deg, rgba(255, 255, 255, .05), transparent 36%);
+        pointer-events: none;
     }
 
     body.adminHomeDashboard .kpiCard {
         min-height: 154px;
         padding: 20px 18px;
         border-radius: 14px;
+        min-width: 0;
+        align-self: start;
+        overflow: hidden;
+    }
+
+    body.adminHomeDashboard .kpiGroup .kpiCard {
+        order: initial !important;
+        grid-column: auto !important;
+        min-height: 224px !important;
+        padding: 18px 16px;
+        align-self: start;
+        box-shadow:
+            0 12px 24px rgba(0, 0, 0, .14),
+            inset 0 1px 0 rgba(255, 255, 255, .05);
+    }
+
+    body.adminHomeDashboard .kpiGroup .kpiCard:first-child {
+        grid-column: 1 / -1 !important;
+        min-height: 176px !important;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-self: start;
+    }
+
+    body.adminHomeDashboard .kpiGroup .kpiWideInner {
+        grid-template-columns: minmax(0, 1fr) minmax(150px, 210px);
+        gap: 18px;
+        width: 100%;
+    }
+
+    body.adminHomeDashboard .kpiGroup .kpiWideInner .kpiCompareStack {
+        margin-top: 0;
+    }
+
+    body.adminHomeDashboard .kpiRepeatWrap {
+        margin-top: 34px;
+        padding-top: 0;
+    }
+
+    body.adminHomeDashboard .kpiRepeatDivider {
+        display: block;
+        width: 100%;
+        height: 8px;
+        margin: 0 0 34px;
+        border: 0;
+        border-radius: 0;
+        background: var(--accent);
+        box-shadow:
+            0 0 0 1px rgba(var(--accent-rgb), .86),
+            0 0 24px rgba(var(--accent-rgb), .36);
+    }
+
+    body.adminHomeDashboard .kpiRepeatControls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        justify-content: flex-end;
+        margin: -14px 0 20px;
+    }
+
+    body.adminHomeDashboard .kpiRepeatTitle {
+        margin-right: auto;
+        font-size: 16px;
+        font-weight: 1000;
+        color: #f8fafc;
+    }
+
+    body.adminHomeDashboard .kpiRepeatControls .kpiFilters {
+        margin-left: 0;
     }
 
     body.adminHomeDashboard .kpiCard:nth-child(1) { order: 4; }
@@ -2752,6 +3110,41 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     body.adminHomeDashboard .kpiSub {
         font-size: 12px;
         margin-top: 10px;
+        overflow-wrap: anywhere;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiGroup {
+        background:
+            linear-gradient(135deg, rgba(255, 255, 255, .95), rgba(248, 250, 252, .86)),
+            #ffffff;
+        border-color: rgba(15, 23, 42, .12);
+        box-shadow:
+            0 18px 42px rgba(15, 23, 42, .10),
+            0 2px 8px rgba(15, 23, 42, .06),
+            inset 0 1px 0 rgba(255, 255, 255, .92);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiGroup::before {
+        background:
+            radial-gradient(circle at 18px 18px, rgba(var(--accent-rgb), .14), transparent 30%),
+            linear-gradient(180deg, rgba(255, 255, 255, .86), transparent 42%);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiGroup .kpiCard {
+        box-shadow:
+            0 10px 24px rgba(15, 23, 42, .08),
+            inset 0 1px 0 rgba(255, 255, 255, .9);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiRepeatDivider {
+        background: var(--accent);
+        box-shadow:
+            0 0 0 1px rgba(var(--accent-rgb), .82),
+            0 10px 22px rgba(var(--accent-rgb), .22);
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .kpiRepeatTitle {
+        color: #111827;
     }
 
     body.adminHomeDashboard .metaLine {
@@ -2773,6 +3166,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     body.adminHomeDashboard .chartWrap {
         min-height: 300px;
         padding: 10px 18px 18px;
+        overflow: hidden;
+    }
+
+    body.adminHomeDashboard .chartWrap svg {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        height: auto;
     }
 
     body.adminHomeDashboard .filtersBar {
@@ -2781,6 +3182,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
     body.adminHomeDashboard .tableWrap {
         padding: 0 18px 18px;
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    body.adminHomeDashboard .table {
+        width: 100%;
     }
 
     body.adminHomeDashboard:not(.adminHomeDark) {
@@ -2910,6 +3319,84 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         font-weight: 900;
     }
 
+    body.adminHomeDashboard .aiSideCommentBtn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 42px;
+        margin-top: 8px;
+        border-radius: 12px;
+        border: 1px solid var(--accentBorder);
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        text-decoration: none;
+        font-weight: 900;
+        cursor: pointer;
+        box-shadow: 0 12px 28px var(--accentSoft);
+    }
+
+    body.adminHomeDashboard .aiSideCommentBtn:disabled {
+        cursor: wait;
+        opacity: .72;
+    }
+
+    body.adminHomeDashboard .aiSideCommentBox {
+        display: none;
+        margin-top: 10px;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(var(--accent-rgb), .28);
+        background: rgba(2, 6, 23, .28);
+        color: #d7def0;
+        font-size: 12px;
+        line-height: 1.75;
+        max-height: 340px;
+        overflow: auto;
+    }
+
+    body.adminHomeDashboard .aiSideCommentHead {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 1000;
+    }
+
+    body.adminHomeDashboard .aiSideCommentBadge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 24px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        color: #fff;
+        font-size: 11px;
+        font-weight: 1000;
+    }
+
+    body.adminHomeDashboard .aiSideCommentText {
+        display: grid;
+        gap: 8px;
+    }
+
+    body.adminHomeDashboard .aiSideCommentText .aiLine {
+        margin: 0;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .aiSideCommentBox {
+        background: #f8fafc;
+        border-color: rgba(15, 23, 42, .12);
+        color: #111827;
+    }
+
+    body.adminHomeDashboard:not(.adminHomeDark) .aiSideCommentHead {
+        color: #111827;
+    }
+
     body.adminHomeDashboard .aiSidePanel .aiBtn {
         min-height: 46px;
         padding: 12px 14px;
@@ -2950,12 +3437,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     }
 
     body.adminHomeDashboard.aiConsultMode .tabsBar {
-        display: block;
-        position: static;
-        margin-left: 230px;
-        background: transparent;
-        box-shadow: none;
-        border-bottom: 0;
+        display: none;
     }
 
     body.adminHomeDashboard.aiConsultMode .tabsBar .page {
@@ -2969,7 +3451,8 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     }
 
     body.adminHomeDashboard.aiConsultMode .topRow::before {
-        content: "AI（相談・チャット）";
+        content: none;
+        display: none;
     }
 
     body.adminHomeDashboard .helpBox .cardHead {
@@ -3002,6 +3485,37 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         gap: 8px;
     }
 
+    @media (max-width: 1500px) and (min-width: 901px) {
+        body.adminHomeDashboard .kpiGrid {
+            grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .kpiCard:nth-child(2),
+        body.adminHomeDashboard .kpiCard:nth-child(6) {
+            grid-column: auto;
+            min-height: 154px;
+        }
+
+        body.adminHomeDashboard .kpiWideInner {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        body.adminHomeDashboard .kpiWideInner .kpiCompareStack {
+            margin-top: 2px;
+        }
+
+        body.adminHomeDashboard .kpiValue {
+            font-size: clamp(28px, 2.7vw, 38px);
+        }
+    }
+
+    @media (max-width: 1180px) and (min-width: 901px) {
+        body.adminHomeDashboard .kpiGroup {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
     @media (max-width: 1180px) {
         body.adminHomeDashboard .grid {
             grid-template-columns: 1fr;
@@ -3015,20 +3529,90 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
     @media (max-width: 900px) {
         body.adminHomeDashboard .azHd {
             position: sticky;
+            top: 0;
             width: auto;
             height: auto;
+            z-index: 220;
         }
 
-        body.adminHomeDashboard .topRow .azHdRight {
-            position: static !important;
-            top: auto !important;
-            right: auto !important;
-            left: auto !important;
-            width: auto;
-            max-width: 100%;
-            margin-left: auto;
+        body.adminHomeDashboard .azHdInner {
+            min-height: 72px;
+            padding: 10px 14px;
             flex-direction: row;
             align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        body.adminHomeDashboard .azHdLeft {
+            flex: 1;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            width: auto;
+            min-width: 0;
+        }
+
+        body.adminHomeDashboard .azLogo {
+            width: auto;
+            padding: 0;
+            flex: 0 0 auto;
+        }
+
+        body.adminHomeDashboard .azLogo::before {
+            font-size: 24px;
+        }
+
+        body.adminHomeDashboard .azMenuBtn {
+            display: inline-flex !important;
+            flex: 0 0 auto;
+            width: 42px;
+            height: 42px;
+            padding: 0;
+            border: 1px solid rgba(148, 163, 184, .22);
+            border-radius: 10px;
+            background: rgba(15, 23, 42, .72);
+            color: #f8fafc;
+        }
+
+        body.adminHomeDashboard .azNav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: min(82vw, 320px);
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            transform: translateX(-105%);
+            transition: transform .25s ease;
+            z-index: 260;
+            background: #080b12;
+            border-right: 1px solid rgba(148, 163, 184, .18);
+            padding: 12px;
+        }
+
+        body.adminHomeDashboard:not(.adminHomeDark) .azNav {
+            background: #ffffff;
+            border-right-color: rgba(0, 0, 0, .08);
+        }
+
+        body.adminHomeDashboard .azNav.is-open {
+            transform: translateX(0);
+        }
+
+        body.adminHomeDashboard .azNavOverlay {
+            z-index: 250;
+        }
+
+        body.adminHomeDashboard .azNav a {
+            min-height: 46px;
+            border-bottom: 0;
+            border-radius: 10px;
+            padding: 0 14px;
         }
 
         body.adminHomeDashboard .azNoticeMenu,
@@ -3049,6 +3633,42 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             padding: 14px;
         }
 
+        body.adminHomeDashboard .cardHead {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        body.adminHomeDashboard .kpiFilters {
+            width: 100%;
+            margin-left: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+            gap: 8px;
+        }
+
+        body.adminHomeDashboard .kpiFilters select,
+        body.adminHomeDashboard .kpiFilters button {
+            width: 100%;
+            min-width: 0;
+        }
+
+        body.adminHomeDashboard .kpiDateFilters {
+            width: 100%;
+            margin-left: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+        }
+
+        body.adminHomeDashboard .kpiDatePicker {
+            width: 100%;
+        }
+
+        body.adminHomeDashboard .kpiDatePicker input[type="date"] {
+            width: 100%;
+            min-width: 0;
+        }
+
         body.adminHomeDashboard.aiConsultMode .tabsBar {
             margin-left: 0;
         }
@@ -3059,6 +3679,35 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
         body.adminHomeDashboard .kpiGrid {
             grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .kpiGroup {
+            grid-template-columns: 1fr;
+            padding: 12px;
+        }
+
+        body.adminHomeDashboard .kpiRepeatWrap {
+            margin-top: 26px;
+            padding-top: 0;
+        }
+
+        body.adminHomeDashboard .kpiRepeatDivider {
+            height: 7px;
+            margin-bottom: 26px;
+        }
+
+        body.adminHomeDashboard .kpiRepeatControls {
+            align-items: stretch;
+            justify-content: stretch;
+            margin: -8px 0 18px;
+        }
+
+        body.adminHomeDashboard .kpiRepeatTitle {
+            margin-right: 0;
+        }
+
+        body.adminHomeDashboard .kpiGroup .kpiCard:first-child {
+            min-height: 168px !important;
         }
 
         body.adminHomeDashboard .kpiCard:nth-child(4),
@@ -3078,6 +3727,57 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
         body.adminHomeDashboard .kpiWideInner .kpiCompareStack {
             margin-top: 2px;
+        }
+
+        body.adminHomeDashboard .kpiGroup .kpiWideInner {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        body.adminHomeDashboard .kpiGroup .kpiWideInner .kpiCompareStack {
+            margin-top: 2px;
+        }
+
+        body.adminHomeDashboard .chartWrap {
+            min-height: 0;
+            padding: 8px 10px 12px;
+        }
+
+        body.adminHomeDashboard .chartWrap svg {
+            height: clamp(170px, 44vw, 260px);
+        }
+
+        body.adminHomeDashboard .tableWrap {
+            padding: 0 10px 12px;
+            overflow-x: auto;
+        }
+
+        body.adminHomeDashboard .table {
+            min-width: 680px;
+        }
+    }
+
+    @media (max-width: 650px) {
+        body.adminHomeDashboard .kpiFilters {
+            grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .kpiDateFilters {
+            grid-template-columns: 1fr;
+        }
+
+        body.adminHomeDashboard .kpiDateFilters button[type="submit"] {
+            width: 100%;
+        }
+
+        body.adminHomeDashboard .tableWrap {
+            display: none;
+        }
+
+        body.adminHomeDashboard .dailyCards {
+            display: grid;
+            gap: 10px;
+            padding: 8px 10px 12px;
         }
     }
     </style>
@@ -3122,18 +3822,10 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 <section class="tabPanel isActive" data-panel="dash" role="tabpanel" aria-label="ダッシュボード">
                     <div>
                         <div class="cardHead">
-                            <div class="cardHeadTitle">📊 KPI（<?= h($periodTitle) ?>）</div>
+                            <div class="cardHeadTitle">📊 店舗情報（<?= h($topKpiDt->format('Y年m月d日')) ?>）</div>
                             <form class="filters kpiFilters" method="get" action="/admin/index.php" id="periodFilterForm">
                                 <input type="hidden" name="store_id" value="<?= (int)$storeId ?>">
-
-                                <?php if ($roundFeatureEnabled): ?>
-                                <select name="round15">
-                                    <option value="1" <?= $roundOn ? 'selected' : '' ?>>調整ON</option>
-                                    <option value="0" <?= !$roundOn ? 'selected' : '' ?>>調整OFF</option>
-                                </select>
-                                <?php else: ?>
-                                <input type="hidden" name="round15" value="<?= $roundOn ? 1 : 0 ?>">
-                                <?php endif; ?>
+                                <input type="hidden" name="kpi_date" value="<?= h($kpiDateInputValue) ?>">
 
                                 <!-- removed label per request -->
                                 <select name="period">
@@ -3145,6 +3837,15 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                     <?php endforeach; ?>
                                 </select>
 
+                                <button type="submit">表示</button>
+                            </form>
+                            <form class="filters kpiDateFilters" method="get" action="/admin/index.php" id="kpiDateFilterForm">
+                                <input type="hidden" name="store_id" value="<?= (int)$storeId ?>">
+                                <input type="hidden" name="period" value="<?= h($periodParam) ?>">
+                                <span class="kpiDatePicker">
+                                    <button type="button" class="kpiDateCalendarBtn" id="kpiDateCalendarBtn" aria-label="カレンダーを開く">📅</button>
+                                    <input type="date" name="kpi_date" id="kpiDateInput" value="<?= h($kpiDateInputValue) ?>" aria-label="KPI表示日">
+                                </span>
                                 <button type="submit">表示</button>
                             </form>
                         </div>
@@ -3167,6 +3868,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                         <?= number_format($rate, 1) ?><span class="kpiUnit">%</span>
                                     </div>
                                     <div class="kpiSub"><?= h(badge_note($colorKey, $noteMap)) ?></div>
+                                    <div class="kpiCompareStack" aria-label="人件費率比較">
+                                        <div class="kpiCompareRow">
+                                            <span class="kpiCompareLabel">前月比</span>
+                                            <span class="kpiCompareValue <?= h(kpi_delta_value_class((float)$ratePrevMonthDiff, true)) ?>">
+                                                <?= h(kpi_delta_float_text((float)$ratePrevMonthDiff, 'pt', 1)) ?>
+                                            </span>
+                                        </div>
+                                    </div>
                                     <details class="kpiDetail">
                                         <summary class="kpiDetailSummary">詳細</summary>
                                         <div class="kpiDetailBody">
@@ -3222,6 +3931,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                             <span class="sub deepNightSub">深割: +<?= number_format((int)$laborNightMonth) ?></span>
                                         <?php endif; ?>
                                     </div>
+                                    <div class="kpiCompareStack" aria-label="人件費比較">
+                                        <div class="kpiCompareRow">
+                                            <span class="kpiCompareLabel">前月比</span>
+                                            <span class="kpiCompareValue <?= h(kpi_delta_value_class((float)$laborPrevMonthDiff, true)) ?>">
+                                                <?= h(kpi_delta_text((int)$laborPrevMonthDiff, '円')) ?>
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div class="kpiCard">
@@ -3239,6 +3956,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                         <?php else: ?>
                                         <a href="/admin/expenses.php?store_id=<?= (int)$storeId ?>" style="color:inherit;text-decoration:underline;">経費を登録</a>すると利益を表示できます
                                         <?php endif; ?>
+                                    </div>
+                                    <div class="kpiCompareStack" aria-label="経費比較">
+                                        <div class="kpiCompareRow">
+                                            <span class="kpiCompareLabel">前月比</span>
+                                            <span class="kpiCompareValue <?= h(kpi_delta_value_class($expensePrevMonthDiff !== null ? (float)$expensePrevMonthDiff : null, true)) ?>">
+                                                <?= h(kpi_delta_text($expensePrevMonthDiff, '円')) ?>
+                                            </span>
+                                        </div>
                                     </div>
                                     <?php if ($expenseHasSettings): ?>
                                     <details class="kpiDetail">
@@ -3298,6 +4023,14 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                                         <?php else: ?>
                                         経費が未設定です
                                         <?php endif; ?>
+                                    </div>
+                                    <div class="kpiCompareStack" aria-label="推定利益比較">
+                                        <div class="kpiCompareRow">
+                                            <span class="kpiCompareLabel">前月比</span>
+                                            <span class="kpiCompareValue <?= h(kpi_delta_value_class($estimatedProfitPrevMonthDiff !== null ? (float)$estimatedProfitPrevMonthDiff : null)) ?>">
+                                                <?= h(kpi_delta_text($estimatedProfitPrevMonthDiff, '円')) ?>
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -3609,13 +4342,13 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 <section class="tabPanel" data-panel="ai" role="tabpanel" aria-label="AI（相談・チャット）">
                     <div class="card">
                         <div class="cardHead">
-                            <div class="cardHeadTitle">🤖 AIに相談（改善案 → 追加質問）</div>
-                            <div class="pill">従業員サマリー: 直近30日固定</div>
+                            <div class="cardHeadTitle">🤖 店舗運営AI改善</div>
+                            <div class="pill">分析期間: <?= h($periodTitle) ?></div>
                         </div>
 
                         <div class="aiCta">
-                            <!-- AI改善案（見た目だけ変更：機能はそのまま） -->
-                            <button type="button" class="aiBtn" onclick="loadAiInsights()">🤖 AIに相談する（改善案）</button>
+                            <!-- AI改善（見た目だけ変更：機能はそのまま） -->
+                            <button type="button" class="aiBtn" onclick="loadAiInsights()">🤖 店舗運営AI改善</button>
                             <div class="aiBtnHint">ボタンを押す → AIが分析 → 下で質問できます</div>
 
                             <div id="aiBox" class="aiBox" style="display:none;">
@@ -3693,7 +4426,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                             </div>
                             <div>
                                 <div class="helpItemTitle">人件費（営業日のみ）</div>
-                                <div class="helpItemText">勤怠から日別人件費を集計し、営業日のみ合算します（打刻調整ON/OFFは人件費だけに影響）。</div>
+                                <div class="helpItemText">勤怠から日別人件費を集計し、営業日のみ合算します。打刻調整は設定画面の「人件費設定」を使います。</div>
                             </div>
                             <div>
                                 <div class="helpItemTitle">来客数 / 客単価</div>
@@ -3731,7 +4464,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                         <div class="helpList">
                             <div>
                                 <div class="helpItemTitle">まず押す</div>
-                                <div class="helpItemText">「AIに相談する（改善案）」→ 全体の結論が出ます。</div>
+                                <div class="helpItemText">「店舗運営AI改善」→ 全体の結論が出ます。</div>
                             </div>
                             <div>
                                 <div class="helpItemTitle">次にボタンで深掘り</div>
@@ -3786,6 +4519,56 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                     link.href = '#dailyTable';
                     link.textContent = 'この日の内訳を見る';
                     intro.appendChild(link);
+
+                    const commentBtn = document.createElement('button');
+                    commentBtn.className = 'aiSideCommentBtn';
+                    commentBtn.type = 'button';
+                    commentBtn.textContent = 'AIコメント';
+                    intro.appendChild(commentBtn);
+
+                    const commentBox = document.createElement('div');
+                    commentBox.className = 'aiSideCommentBox';
+                    commentBox.setAttribute('aria-live', 'polite');
+                    commentBox.innerHTML = `
+                        <div class="aiSideCommentHead">
+                            <span class="aiSideCommentBadge">AI</span>
+                            <span>AIチャット：人件費率が高い日の分析</span>
+                        </div>
+                        <div class="aiSideCommentText">AIコメントを取得します。</div>
+                    `;
+                    intro.appendChild(commentBox);
+
+                    commentBtn.addEventListener('click', async () => {
+                        const textEl = commentBox.querySelector('.aiSideCommentText');
+                        commentBox.style.display = 'block';
+                        commentBtn.disabled = true;
+                        commentBtn.textContent = '分析中...';
+                        if (textEl) textEl.textContent = '人件費率が高い日と曜日傾向を分析しています...';
+
+                        try {
+                            const url = `/admin/ai_insights.php?store_id=<?= (int)$storeId ?>&round15=<?= $roundOn ? 1 : 0 ?>&from=<?= rawurlencode($periodStart) ?>&to=<?= rawurlencode($periodEnd) ?>&side_comment=1`;
+                            const res = await fetch(url, {
+                                credentials: 'same-origin'
+                            });
+                            const ct = (res.headers.get('content-type') || '').toLowerCase();
+                            if (!ct.includes('application/json')) {
+                                const t = await res.text();
+                                throw new Error('AIコメントの取得に失敗しました: ' + t.slice(0, 120));
+                            }
+                            const json = await res.json();
+                            if (!json.ok) throw new Error(json.message || json.error || 'AIコメントの取得に失敗しました');
+                            if (textEl) {
+                                textEl.innerHTML = (typeof formatAiAnswer === 'function')
+                                    ? formatAiAnswer(json.insights || '分析結果が空でした。')
+                                    : String(json.insights || '分析結果が空でした。');
+                            }
+                        } catch (e) {
+                            if (textEl) textEl.textContent = String(e.message || e);
+                        } finally {
+                            commentBtn.disabled = false;
+                            commentBtn.textContent = 'AIコメント';
+                        }
+                    });
                 }
                 rightCol.prepend(sidePanel);
                 if (oldInsight) oldInsight.remove();
@@ -3809,6 +4592,191 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             }
         })();
 
+        (function setupKpiGroups() {
+            const grid = document.querySelector('.kpiGrid');
+            if (!grid || grid.querySelector('.kpiGroup')) return;
+
+            const cards = Array.from(grid.querySelectorAll(':scope > .kpiCard'));
+            const findCard = (label) => cards.find((card) => {
+                const text = card.querySelector('.kpiLabel')?.textContent.trim() || '';
+                return text === label;
+            });
+
+            const groups = [
+                {
+                    className: 'kpiGroup kpiGroupFinance',
+                    label: '売上・経費・推定利益',
+                    cards: ['売上', '経費（日割）', '推定利益']
+                },
+                {
+                    className: 'kpiGroup kpiGroupPeople',
+                    label: '来客数・人件費・人件費率',
+                    cards: ['来客数', '人件費', '人件費率']
+                }
+            ];
+
+            const fragment = document.createDocumentFragment();
+            groups.forEach((groupConfig) => {
+                const group = document.createElement('div');
+                group.className = groupConfig.className;
+                group.setAttribute('aria-label', groupConfig.label);
+                groupConfig.cards.forEach((label) => {
+                    const card = findCard(label);
+                    if (card) group.appendChild(card);
+                });
+                if (group.children.length) fragment.appendChild(group);
+            });
+
+            grid.appendChild(fragment);
+        })();
+
+        (function setupKpiDatePicker() {
+            const btn = document.getElementById('kpiDateCalendarBtn');
+            const input = document.getElementById('kpiDateInput');
+            const datePeriod = document.querySelector('#kpiDateFilterForm input[name="period"]');
+            const periodSelect = document.querySelector('#periodFilterForm select[name="period"]');
+            if (!btn || !input) return;
+
+            btn.addEventListener('click', () => {
+                if (typeof input.showPicker === 'function') {
+                    input.showPicker();
+                    return;
+                }
+                input.focus();
+                input.click();
+            });
+
+            if (datePeriod && periodSelect) {
+                const syncPeriod = () => {
+                    datePeriod.value = periodSelect.value || '<?= h($defaultPeriodParam) ?>';
+                };
+                periodSelect.addEventListener('change', syncPeriod);
+                syncPeriod();
+            }
+        })();
+
+        (function duplicateKpiCards() {
+            const grid = document.querySelector('.kpiGrid');
+            if (!grid || document.querySelector('.kpiRepeatWrap')) return;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'kpiRepeatWrap';
+            wrap.setAttribute('aria-label', '複製KPI');
+
+            const divider = document.createElement('hr');
+            divider.className = 'kpiRepeatDivider';
+            divider.setAttribute('aria-hidden', 'true');
+            wrap.appendChild(divider);
+
+            const filters = document.querySelector('#periodFilterForm');
+            if (filters) {
+                const controls = document.createElement('div');
+                controls.className = 'kpiRepeatControls';
+                const repeatTitle = document.createElement('div');
+                repeatTitle.className = 'kpiRepeatTitle';
+                repeatTitle.textContent = '📊 店舗情報（<?= h($periodTitle) ?>）';
+                controls.appendChild(repeatTitle);
+                controls.appendChild(filters);
+                wrap.appendChild(controls);
+            }
+
+            const copy = grid.cloneNode(true);
+            copy.classList.add('kpiGridCopy');
+            copy.setAttribute('aria-label', 'KPI複製');
+            wrap.appendChild(copy);
+
+            grid.after(wrap);
+        })();
+
+        (function applyTopKpiDatePayload() {
+            const payload = <?= json_encode($topKpiPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+            const grid = document.querySelector('.cardInner > .kpiGrid:not(.kpiGridCopy)');
+            if (!grid || !payload || !payload.cards) return;
+
+            const title = document.querySelector('.cardHeadTitle');
+            if (title && payload.title) {
+                title.textContent = payload.title;
+            }
+
+            const cards = Array.from(grid.querySelectorAll('.kpiCard'));
+            const findCard = (label) => cards.find((card) => {
+                const text = card.querySelector('.kpiLabel')?.textContent.trim() || '';
+                return text === label;
+            });
+
+            const applyCard = (label, data) => {
+                const card = findCard(label);
+                if (!card || !data) return;
+
+                const value = card.querySelector('.kpiValue');
+                if (value && typeof data.valueHtml === 'string') {
+                    value.innerHTML = data.valueHtml;
+                    value.style.color = data.valueColor || '';
+                }
+
+                const sub = card.querySelector('.kpiSub');
+                if (sub && typeof data.subHtml === 'string') {
+                    sub.innerHTML = data.subHtml;
+                }
+
+                const badge = card.querySelector('.kpiMainBadge');
+                if (badge && typeof data.badgeText === 'string') {
+                    if (data.badgeText) {
+                        badge.textContent = data.badgeText;
+                        badge.className = `kpiMainBadge ${data.badgeClass || ''}`.trim();
+                        badge.style.display = '';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+
+                const compareValues = Array.from(card.querySelectorAll('.kpiCompareValue'));
+                (data.compares || []).forEach((compare, index) => {
+                    const el = compareValues[index];
+                    if (!el) return;
+                    el.textContent = compare.text || '-';
+                    el.className = `kpiCompareValue ${compare.className || 'isFlat'}`;
+                });
+
+                const detail = card.querySelector('.kpiDetailBody');
+                if (detail && typeof data.detailHtml === 'string') {
+                    detail.innerHTML = data.detailHtml;
+                }
+            };
+
+            Object.entries(payload.cards).forEach(([label, data]) => applyCard(label, data));
+        })();
+
+        (function placeHomeSidePanels() {
+            const grid = document.querySelector('.grid');
+            const rightCol = document.querySelector('.rightCol');
+            const dashInner = document.querySelector('.tabPanel[data-panel="dash"] > div');
+            const chartCard = document.querySelector('#chartAccordion')?.closest('.tableCard');
+            if (!grid || !rightCol || !dashInner || !chartCard) return;
+
+            const place = () => {
+                const stacked = window.matchMedia('(max-width: 1180px)').matches &&
+                    !document.body.classList.contains('aiConsultMode');
+                if (stacked) {
+                    if (rightCol.parentElement !== dashInner) {
+                        dashInner.insertBefore(rightCol, chartCard);
+                    }
+                    return;
+                }
+
+                if (rightCol.parentElement !== grid) {
+                    grid.appendChild(rightCol);
+                }
+            };
+
+            place();
+            window.addEventListener('resize', place);
+            new MutationObserver(place).observe(document.body, {
+                attributes: true,
+                attributeFilter: ['class']
+            });
+        })();
+
         (function() {
             const btns = document.querySelectorAll('.chartBtn');
             const panels = document.querySelectorAll('[data-chart-panel]');
@@ -3826,7 +4794,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             setActive('rate');
         })();
 
-        // ✅ AI用は「直近30日固定」
+        // ✅ AI用は表示中の期間に合わせる
         const EMPLOYEE_SUMMARY_30 =
             <?= json_encode($employeeSummary30, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
         const EMPLOYEE_SUMMARY_PERIOD = {
@@ -3834,7 +4802,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             to: "<?= h($aiTo) ?>"
         };
 
-        const AI_STATE_KEY = `aiBoxState:v2:store<?= (int)$storeId ?>:round<?= $roundOn ? 1 : 0 ?>`;
+        const AI_STATE_KEY = `aiBoxState:v2:store<?= (int)$storeId ?>:round<?= $roundOn ? 1 : 0 ?>:<?= h($periodStart) ?>:<?= h($periodEnd) ?>`;
 
         function safeJsonParse(s) {
             try {
@@ -3874,7 +4842,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             if (!st || !st.open) return;
 
             document.getElementById('aiBox').style.display = 'block';
-            document.getElementById('aiStatusText').textContent = st.statusText || 'AI改善案';
+            document.getElementById('aiStatusText').textContent = st.statusText || '店舗運営AI改善';
             document.getElementById('aiSpinner').style.display = 'none';
             document.getElementById('aiText').innerHTML = st.aiTextHtml || '';
 
@@ -4035,7 +5003,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
             saveAiBoxState();
 
             try {
-                const url = `/admin/ai_insights.php?store_id=<?= (int)$storeId ?>&round15=<?= $roundOn ? 1 : 0 ?>`;
+                const url = `/admin/ai_insights.php?store_id=<?= (int)$storeId ?>&round15=<?= $roundOn ? 1 : 0 ?>&from=<?= rawurlencode($periodStart) ?>&to=<?= rawurlencode($periodEnd) ?>`;
                 const res = await fetch(url, {
                     credentials: 'same-origin'
                 });
@@ -4049,7 +5017,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 const json = await res.json();
                 if (!json.ok) throw new Error(json.message || json.error || 'unknown error');
 
-                setStatus(`AI改善案（${json.from}〜${json.to} / 平均人件費率 ${json.rate_avg ?? '-'}%）`, false);
+                setStatus(`店舗運営AI改善（${json.from}〜${json.to} / 平均人件費率 ${json.rate_avg ?? '-'}%）`, false);
                 el('aiText').innerHTML = formatAiAnswer(json.insights || '(テキストが空でした)');
 
                 aiCtx.loaded = true;
@@ -4117,7 +5085,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
         function deepDive(n) {
             if (!aiCtx.loaded) {
-                alert('先に「AIに相談する（改善案）」を押してください。');
+                alert('先に「店舗運営AI改善」を押してください。');
                 return;
             }
             const map = {
@@ -4146,7 +5114,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
         async function sendAiQuestion() {
             if (!aiCtx.loaded) {
-                alert('先に「AIに相談する（改善案）」を押してください。');
+                alert('先に「店舗運営AI改善」を押してください。');
                 return;
             }
             if (aiCtx.sending) return;
@@ -4195,7 +5163,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
                 appendFollowupTurn(q, json.answer || '');
                 el('aiAskInput').value = '';
-                setStatus(`AI改善案（${aiCtx.from}〜${aiCtx.to}）`, false);
+                setStatus(`店舗運営AI改善（${aiCtx.from}〜${aiCtx.to}）`, false);
                 saveAiBoxState();
             } catch (e) {
                 setStatus('エラー', false);
@@ -4311,6 +5279,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
 
     (function openAiFromQuery() {
         if (!document.body.classList.contains('adminHomeDashboard')) return;
+        if (document.getElementById('azPageAiPanel')) return;
         const params = new URLSearchParams(window.location.search);
         if (params.get('open_ai') !== '1') return;
         window.setTimeout(() => {

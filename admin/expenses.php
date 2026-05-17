@@ -230,10 +230,10 @@ $monthlyTotal = array_sum(array_map(fn($r) => (int)$r['amount_yen'], $monthlyRow
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#add">従業員追加</a>
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#payroll">店舗設定</a>
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#store">店舗追加</a>
-                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費率設定</a>
+                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費設定</a>
                 <a class="tabBtn isActive" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>&month=<?= h($month) ?>">経費</a>
                 <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>">端末管理</a>
-                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>">色変更</a>
+                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>">テーマ変更</a>
             </div>
 
             <div class="tabWrap">

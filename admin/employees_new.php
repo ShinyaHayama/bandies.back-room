@@ -1044,7 +1044,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $tz = sanitizeTz((string)($_POST['payroll_tz'] ?? 'Asia/Tokyo'), 'Asia/Tokyo');
                 $payMonthOffset = clampMonthOffset((int)($_POST['payroll_pay_month_offset'] ?? 1), 1);
-                $roundUnit = clampRoundUnit((int)($_POST['payroll_round_unit_minutes'] ?? 15), 15);
+                $roundUnit = clampRoundUnit((int)($_POST['payroll_round_unit_minutes'] ?? $storeRoundUnit), $storeRoundUnit);
                 $cutoffTime = normalizeCutoffTime((string)($_POST['business_day_cutoff_time'] ?? ''), $storeCutoff);
 
                 $closeDay = clampDay((int)($_POST['payroll_close_day'] ?? 31), 31);
@@ -1123,13 +1123,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $storeBusinessDay = businessDateFromTs(time(), cutoffToSeconds($storeCutoff));
 
                 $offsetJa = ['当月', '翌月', '翌々月'];
-                $roundJa = ($roundUnit === 0) ? 'OFF' : ($roundUnit . '分');
-
                 if ($cycleType === 'monthly') {
-                    $success = "給与設定を保存しました（月払い：締日 {$closeDay}日 / 支払日 {$payDay}日 / 支払月 {$offsetJa[$payMonthOffset]} / 打刻調整 {$roundJa} / TZ {$tz}）";
+                    $success = "給与設定を保存しました（月払い：締日 {$closeDay}日 / 支払日 {$payDay}日 / 支払月 {$offsetJa[$payMonthOffset]} / TZ {$tz}）";
                 } else {
                     $wdayJaLocal = ['日', '月', '火', '水', '木', '金', '土'];
-                    $success = "給与設定を保存しました（週払い：締め {$wdayJaLocal[$weekCloseWday]}曜 / 支払 +{$weekPayOffset}日 / 支払月 {$offsetJa[$payMonthOffset]} / 打刻調整 {$roundJa} / TZ {$tz}）";
+                    $success = "給与設定を保存しました（週払い：締め {$wdayJaLocal[$weekCloseWday]}曜 / 支払 +{$weekPayOffset}日 / 支払月 {$offsetJa[$payMonthOffset]} / TZ {$tz}）";
                 }
             } elseif ($action === 'update_slot_setting') {
                 $enableSlot = ((int)($_POST['enable_slot'] ?? 1) === 1) ? 1 : 0;
@@ -1175,12 +1173,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($action === 'update_store_labor_thresholds') {
                 $greenMax  = clampRate((float)($_POST['labor_green_max_rate'] ?? 30.0), 30.0);
                 $yellowMax = clampRate((float)($_POST['labor_yellow_max_rate'] ?? 35.0), 35.0);
+                $roundUnit = clampRoundUnit((int)($_POST['payroll_round_unit_minutes'] ?? $storeRoundUnit), $storeRoundUnit);
                 if ($yellowMax < $greenMax) $yellowMax = $greenMax;
 
                 $stmt = $pdo->prepare("
                     UPDATE stores
                        SET labor_green_max_rate  = :g,
                            labor_yellow_max_rate = :y,
+                           payroll_round_unit_minutes = :round_unit,
                            updated_at = NOW()
                      WHERE tenant_id = :tenant_id
                        AND id        = :store_id
@@ -1189,15 +1189,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([
                     ':g' => $greenMax,
                     ':y' => $yellowMax,
+                    ':round_unit' => $roundUnit,
                     ':tenant_id' => $tenantId,
                     ':store_id'  => $storeId,
                 ]);
-                if ($stmt->rowCount() === 0) throw new RuntimeException('人件費率設定を更新できませんでした（対象店舗なし）');
+                if ($stmt->rowCount() === 0) {
+                    $existsStmt = $pdo->prepare("SELECT 1 FROM stores WHERE tenant_id = :tenant_id AND id = :store_id LIMIT 1");
+                    $existsStmt->execute([':tenant_id' => $tenantId, ':store_id' => $storeId]);
+                    if (!$existsStmt->fetchColumn()) {
+                        throw new RuntimeException('人件費設定を更新できませんでした（対象店舗なし）');
+                    }
+                }
 
                 $storeLaborGreenMax  = $greenMax;
                 $storeLaborYellowMax = $yellowMax;
+                $storeRoundUnit = $roundUnit;
 
-                $success = "人件費率の色判定を保存しました（GREEN ≤ {$greenMax}% / YELLOW ≤ {$yellowMax}% / RED > {$yellowMax}%）";
+                $roundJa = ($roundUnit === 0) ? 'OFF' : ($roundUnit . '分');
+                $success = "人件費設定を保存しました（打刻調整 {$roundJa} / 適正 ≤ {$greenMax}% / 注意 ≤ {$yellowMax}%）";
             } elseif ($action === 'update_help_popup_pref') {
                 $adminUserId = (int)($_SESSION['tenant_admin_user_id'] ?? 0);
                 if ($adminUserId <= 0) {
@@ -1464,6 +1473,24 @@ $tenantLabel = ($tenantName !== '')
         margin-top: 6px;
     }
 
+    .settingNote {
+        margin: 8px 0 14px;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #f8fafc;
+        color: #334155;
+        font-size: 12px;
+        line-height: 1.6;
+    }
+
+    .settingMiniTitle {
+        margin: 0 0 6px;
+        color: #0f172a;
+        font-size: 13px;
+        font-weight: 900;
+    }
+
     .fieldGrid {
         display: grid;
         gap: 10px;
@@ -1702,10 +1729,10 @@ $tenantLabel = ($tenantName !== '')
                 <button type="button" class="tabBtn" data-tab="payroll" role="tab" aria-selected="false">店舗設定</button>
                 <button type="button" class="tabBtn" data-tab="store" role="tab" aria-selected="false">店舗追加</button>
                 <button type="button" class="tabBtn" data-tab="labor" role="tab"
-                    aria-selected="false">人件費率設定</button>
+                    aria-selected="false">人件費設定</button>
                 <a class="tabBtn" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">経費</a>
                 <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">端末管理</a>
-                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">色変更</a>
+                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>" role="tab" aria-selected="false">テーマ変更</a>
             </div>
 
             <div class="tabWrap">
@@ -1914,15 +1941,6 @@ $tenantLabel = ($tenantName !== '')
                                     <?php endforeach; ?>
                                 </select>
 
-                                <div class="label" style="margin-top:12px;">打刻時刻の調整（分）</div>
-                                <select class="input inputShort" name="payroll_round_unit_minutes">
-                                    <option value="0" <?= $storeRoundUnit === 0 ? 'selected' : '' ?>>OFF（調整なし）</option>
-                                    <?php for ($m = 5; $m <= 30; $m++): ?>
-                                    <option value="<?= $m ?>" <?= ($storeRoundUnit === $m) ? 'selected' : '' ?>>
-                                        <?= $m ?>分</option>
-                                    <?php endfor; ?>
-                                </select>
-
                                 <div class="label" style="margin-top:12px;">営業日切替時刻</div>
                                 <input class="input inputShort" type="time" name="business_day_cutoff_time"
                                     value="<?= h($storeCutoffInput) ?>" step="60">
@@ -2079,7 +2097,7 @@ $tenantLabel = ($tenantName !== '')
                 </div>
 
                 <!-- =========================
-                     ✅ TAB: 人件費率
+                     ✅ TAB: 人件費設定
                      ========================= -->
                 <div class="tabPanel" id="tab_labor" data-panel="labor">
                     <div class="card" style="border:none; padding:0;">
@@ -2088,6 +2106,23 @@ $tenantLabel = ($tenantName !== '')
                             <input type="hidden" name="action" value="update_store_labor_thresholds">
 
                             <div class="box">
+                                <div class="settingMiniTitle">打刻調整</div>
+                                <div class="settingNote">
+                                    数分の打刻ズレを、選んだ分単位に整えて人件費を計算します。店舗の運用ルールに合わせて設定してください。
+                                </div>
+                                <div style="min-width:220px; max-width:320px;">
+                                    <div class="label">打刻調整</div>
+                                    <select class="input inputShort" name="payroll_round_unit_minutes">
+                                        <option value="0" <?= $storeRoundUnit === 0 ? 'selected' : '' ?>>OFF（実打刻で計算）</option>
+                                        <?php for ($m = 5; $m <= 30; $m++): ?>
+                                        <option value="<?= $m ?>" <?= ($storeRoundUnit === $m) ? 'selected' : '' ?>>
+                                            <?= $m ?>分単位で調整</option>
+                                        <?php endfor; ?>
+                                    </select>
+                                    <div class="hint">ホームの人件費・人件費率にも反映されます。</div>
+                                </div>
+
+                                <div class="settingMiniTitle" style="margin-top:18px;">人件費率の判定</div>
                                 <div class="row" style="gap:10px; justify-content:flex-start;">
                                     <div style="min-width:220px;">
                                         <div class="label">正常上限（例：30.0）</div>

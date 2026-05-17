@@ -91,7 +91,7 @@ $bodyClass = admin_theme_body_class($theme);
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>色変更</title>
+    <title>テーマ変更</title>
     <style>
     :root {
         --bg: #f8fafc;
@@ -396,10 +396,10 @@ $bodyClass = admin_theme_body_class($theme);
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#add">従業員追加</a>
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#payroll">店舗設定</a>
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#store">店舗追加</a>
-                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費率設定</a>
+                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費設定</a>
                 <a class="tabBtn" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>">経費</a>
                 <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>">端末管理</a>
-                <a class="tabBtn isActive" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>">色変更</a>
+                <a class="tabBtn isActive" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>">テーマ変更</a>
             </div>
 
             <?php if ($success !== ''): ?>

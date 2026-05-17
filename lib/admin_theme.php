@@ -246,40 +246,102 @@ body.adminTheme.adminHomeDark .monthlyRow {
     border-color: var(--theme-line) !important;
     color: var(--theme-text) !important;
 }
-body.adminTheme.adminHomeDark .tpDaily tbody td,
-body.adminTheme.adminHomeDark .tpDaily .timeCell,
-body.adminTheme.adminHomeDark .tpDaily .punchTimeCell,
-body.adminTheme.adminHomeDark .tpDaily .timeWithSourceLabel,
-body.adminTheme.adminHomeDark .tpDaily .wk,
-body.adminTheme.adminHomeDark .tpDaily .dateLine,
-body.adminTheme.adminHomeDark .tpDaily .dateLine > span:first-child {
-    color: #f8fafc !important;
+body.adminTheme.adminHomeDark .tpDaily tbody td {
+    color: #111827 !important;
 }
 body.adminTheme.adminHomeDark .tpDaily table,
 body.adminTheme.adminHomeDark .tpDaily tbody,
 body.adminTheme.adminHomeDark .tpDaily tbody tr {
-    background: rgba(11, 17, 29, .96) !important;
+    background: #fff !important;
 }
 body.adminTheme.adminHomeDark .tpDaily tbody tr:nth-child(odd) {
-    background: rgba(15, 23, 42, .96) !important;
+    background: #fff !important;
 }
 body.adminTheme.adminHomeDark .tpDaily tbody tr:nth-child(even) {
-    background: rgba(12, 18, 30, .96) !important;
+    background: #fff !important;
 }
 body.adminTheme.adminHomeDark .tpDaily tbody tr:hover {
-    background: rgba(30, 41, 59, .96) !important;
+    background: #f8fafc !important;
 }
-body.adminTheme.adminHomeDark .tpDaily .tpRowWarn {
-    background: rgba(127, 29, 29, .38) !important;
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowWarn,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowWarn:hover {
+    background: #FFF0F0 !important;
 }
-body.adminTheme.adminHomeDark .tpDaily .tpRowUnconfirmed {
-    background: rgba(120, 53, 15, .38) !important;
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowUnconfirmed,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowUnconfirmed:hover {
+    background: #FFFBEA !important;
 }
-body.adminTheme.adminHomeDark .tpDaily .tpRowPaid {
-    background: rgba(30, 41, 59, .78) !important;
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowPaid,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowPaid:hover {
+    background: #f3f4f6 !important;
 }
-body.adminTheme.adminHomeDark .tpDaily .tpRowCanceled {
-    background: rgba(127, 29, 29, .44) !important;
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowCanceled,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowCanceled:hover {
+    background: #FFECEC !important;
+}
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowWarn > td,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowWarn:hover > td {
+    background: #FFF0F0 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowUnconfirmed > td,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowUnconfirmed:hover > td {
+    background: #FFFBEA !important;
+}
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowPaid > td,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowPaid:hover > td {
+    background: #f3f4f6 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowCanceled > td,
+body.adminTheme.adminHomeDark .tpDaily tbody tr.tpRowCanceled:hover > td {
+    background: #FFECEC !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .cardWrap {
+    border-color: #eeeeee !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCard {
+    background: #fff !important;
+    border-color: #eeeeee !important;
+    color: #111827 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCardRow {
+    border-color: #eeeeee !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCardKey {
+    color: #8b8b8b !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCard.tpRowWarn {
+    background: #FFF0F0 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCard.tpRowUnconfirmed {
+    background: #FFFBEA !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCard.tpRowPaid {
+    background: #f3f4f6 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .tpCard.tpRowCanceled {
+    background: #FFECEC !important;
+}
+body.adminTheme.adminHomeDark .tpDaily thead,
+body.adminTheme.adminHomeDark .tpDaily thead th {
+    background: #111 !important;
+    color: #fff !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .timeCell,
+body.adminTheme.adminHomeDark .tpDaily .punchTimeCell,
+body.adminTheme.adminHomeDark .tpDaily .timeWithSourceLabel,
+body.adminTheme.adminHomeDark .tpDaily .wk,
+body.adminTheme.adminHomeDark .tpDaily .muted,
+body.adminTheme.adminHomeDark .tpDaily .okText {
+    color: #6b7280 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .warnText {
+    color: #b91c1c !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .sun {
+    color: #e11d48 !important;
+}
+body.adminTheme.adminHomeDark .tpDaily .sat {
+    color: #365EAB !important;
 }
 body.adminTheme.adminHomeDark .tpDaily tbody td,
 body.adminTheme.adminHomeDark .tpDaily thead th,
@@ -291,7 +353,7 @@ body.adminTheme.adminHomeDark .tpDaily .tableWrap table th:nth-child(11),
 body.adminTheme.adminHomeDark .tpDaily .tableWrap table td:nth-child(11),
 body.adminTheme.adminHomeDark .tpDaily .tableWrap table th:nth-child(12),
 body.adminTheme.adminHomeDark .tpDaily .tableWrap table td:nth-child(12) {
-    border-color: rgba(148, 163, 184, .26) !important;
+    border-color: #eeeeee !important;
 }
 body.adminTheme.adminHomeDark.shiftPage {
     --bg: #080b12;

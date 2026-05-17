@@ -1491,6 +1491,34 @@ $items = array_values(array_filter($sessions, function ($s) use ($from, $to) {
     return ($day >= $from && $day <= $to);
 }));
 
+function sortDailyPunchItems(array &$items): void
+{
+    usort($items, function ($a, $b) {
+        $dayCmp = strcmp((string)$b['day'], (string)$a['day']);
+        if ($dayCmp !== 0) return $dayCmp;
+
+        $ain = (int)($a['_display_in_ts'] ?? 0);
+        $bin = (int)($b['_display_in_ts'] ?? 0);
+        if (($ain > 0) !== ($bin > 0)) return ($ain > 0) ? -1 : 1;
+        if ($ain > 0 && $bin > 0 && $ain !== $bin) return $bin <=> $ain;
+
+        $aout = (int)($a['_display_out_ts'] ?? 0);
+        $bout = (int)($b['_display_out_ts'] ?? 0);
+        if (($aout > 0) !== ($bout > 0)) return ($aout > 0) ? -1 : 1;
+        if ($aout > 0 && $bout > 0 && $aout !== $bout) return $bout <=> $aout;
+
+        $nameCmp = strcmp((string)($a['display_name'] ?? ''), (string)($b['display_name'] ?? ''));
+        if ($nameCmp !== 0) return $nameCmp;
+
+        $empCmp = (int)$a['employee_id'] <=> (int)$b['employee_id'];
+        if ($empCmp !== 0) return $empCmp;
+
+        return (int)$a['seq'] <=> (int)$b['seq'];
+    });
+}
+
+sortDailyPunchItems($items);
+
 // 支払状況（エクスポートでも使用するため先に用意）
 $paymentStatusLabels = [
     'unconfirmed' => '未確認',
@@ -1668,20 +1696,6 @@ if ($export === 'csv' || $export === 'pdf') {
     echo $html;
     exit;
 }
-
-usort($items, function ($a, $b) {
-    if ($a['day'] === $b['day']) {
-        if ((int)$a['employee_id'] === (int)$b['employee_id']) {
-            $ain = (int)($a['_display_in_ts'] ?? 0);
-            $bin = (int)($b['_display_in_ts'] ?? 0);
-            if (($ain > 0) !== ($bin > 0)) return ($bin > 0) <=> ($ain > 0);
-            if ($ain !== $bin) return $bin <=> $ain;
-            return (int)$a['seq'] <=> (int)$b['seq'];
-        }
-        return (int)$a['employee_id'] <=> (int)$b['employee_id'];
-    }
-    return strcmp((string)$b['day'], (string)$a['day']);
-});
 
 $totalWorkSec = 0;
 $totalBreakSec = 0;
@@ -1905,6 +1919,35 @@ $quickAddTimeOptions = buildTimeOptions(5);
             -webkit-overflow-scrolling: touch;
         }
 
+        .tpDaily {
+            min-height: 100vh;
+            min-height: 100dvh;
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding-bottom: 0;
+        }
+
+        .tpDaily .tableWrap {
+            flex: 1 1 auto;
+            min-height: 0;
+            height: auto;
+            border-bottom: 1px solid var(--line);
+            background: #fffbea;
+        }
+
+        .tpDaily .tableWrap>form {
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        body.adminTheme.adminHomeDark .tpDaily .tableWrap {
+            background: #fffbea !important;
+        }
+
         .tpTableStickyWrap {
             position: fixed;
             display: none;
@@ -1937,6 +1980,8 @@ $quickAddTimeOptions = buildTimeOptions(5);
 
         .tpDaily thead th {
             text-align: center;
+            background: #111 !important;
+            color: #fff !important;
         }
 
         .tpDaily thead th:nth-child(n+2),
