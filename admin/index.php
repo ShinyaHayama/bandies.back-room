@@ -288,6 +288,19 @@ function valid_ymd_param(string $ymd): bool
     return $dt instanceof DateTimeImmutable && $dt->format('Y-m-d') === $ymd;
 }
 
+function previous_month_same_day(DateTimeImmutable $dt): DateTimeImmutable
+{
+    $prevMonthFirst = $dt->modify('first day of previous month');
+    $prevMonthLastDay = (int)$prevMonthFirst->modify('last day of this month')->format('j');
+    $day = min((int)$dt->format('j'), $prevMonthLastDay);
+
+    return $prevMonthFirst->setDate(
+        (int)$prevMonthFirst->format('Y'),
+        (int)$prevMonthFirst->format('m'),
+        $day
+    );
+}
+
 // =========================================================
 // ✅ 表示期間（プルダウン）
 // - period=ym:YYYY-MM       : 指定月（過去12ヶ月）
@@ -869,38 +882,27 @@ $topAvgTicket = ($topCustomers > 0 && $topSales > 0) ? (int)floor($topSales / $t
 
 $topCompareDate = $topKpiDate;
 $topComparePrevDay = $topKpiDt->modify('-1 day')->format('Y-m-d');
-$topCompareMonthStart = $topKpiDt->modify('first day of this month')->format('Y-m-d');
-$topComparePrevMonthStartDt = $topKpiDt->modify('first day of previous month');
-$topComparePrevMonthLastDt = $topComparePrevMonthStartDt->modify('last day of this month');
-$topCompareDayOffset = max(0, (int)$topKpiDt->format('j') - 1);
-$topComparePrevMonthEndDt = $topComparePrevMonthStartDt->modify('+' . $topCompareDayOffset . ' days');
-if ($topComparePrevMonthEndDt > $topComparePrevMonthLastDt) {
-    $topComparePrevMonthEndDt = $topComparePrevMonthLastDt;
-}
-$topComparePrevMonthStart = $topComparePrevMonthStartDt->format('Y-m-d');
-$topComparePrevMonthEnd = $topComparePrevMonthEndDt->format('Y-m-d');
-$topCompareCurrentDates = ymd_range($topCompareMonthStart, $topCompareDate, $tz);
-$topComparePrevMonthDates = ymd_range($topComparePrevMonthStart, $topComparePrevMonthEnd, $tz);
+$topComparePrevMonthDate = previous_month_same_day($topKpiDt)->format('Y-m-d');
+$topCompareFetchStart = ($topComparePrevMonthDate < $topComparePrevDay) ? $topComparePrevMonthDate : $topComparePrevDay;
 
-$topSalesCompareMap = sales_map_with_customers($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topCompareDate, $tz, $cutoffTime);
+$topSalesCompareMap = sales_map_with_customers($pdo, $tenantId, $storeId, $topCompareFetchStart, $topCompareDate, $tz, $cutoffTime);
 $topCustomersCompareAvailable = ($topCustomersDays > 0 || sales_map_has_customers($topSalesCompareMap));
 $topSalesPrevDayDiff = (int)($topSalesCompareMap[$topCompareDate]['sales'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevDay]['sales'] ?? 0);
 $topCustomersPrevDayDiff = $topCustomersCompareAvailable
     ? ((int)($topSalesCompareMap[$topCompareDate]['customers'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevDay]['customers'] ?? 0))
     : null;
-$topCompareCurrentTotals = sales_customer_totals_for_dates($topCompareCurrentDates, $topSalesCompareMap, $topCustomersCompareAvailable);
-$topComparePrevMonthTotals = sales_customer_totals_for_dates($topComparePrevMonthDates, $topSalesCompareMap, $topCustomersCompareAvailable);
-$topSalesPrevMonthDiff = (int)$topCompareCurrentTotals['sales'] - (int)$topComparePrevMonthTotals['sales'];
+$topSalesPrevMonthDiff = (int)($topSalesCompareMap[$topCompareDate]['sales'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevMonthDate]['sales'] ?? 0);
 $topCustomersPrevMonthDiff = $topCustomersCompareAvailable
-    ? ((int)$topCompareCurrentTotals['customers'] - (int)$topComparePrevMonthTotals['customers'])
+    ? ((int)($topSalesCompareMap[$topCompareDate]['customers'] ?? 0) - (int)($topSalesCompareMap[$topComparePrevMonthDate]['customers'] ?? 0))
     : null;
 
-$topLaborCompareDetail = mvp_daily_labor_detail($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topCompareDate, $roundOn);
+$topLaborCompareDetail = mvp_daily_labor_detail($pdo, $tenantId, $storeId, $topCompareFetchStart, $topCompareDate, $roundOn);
 $topLaborComparePeriod = $topLaborCompareDetail['total'] ?? [];
-$topCompareCurrentMetrics = monthly_metrics_excluding_holidays($topCompareCurrentDates, $topSalesCompareMap, $topLaborComparePeriod);
-$topComparePrevMonthMetrics = monthly_metrics_excluding_holidays($topComparePrevMonthDates, $topSalesCompareMap, $topLaborComparePeriod);
-$topLaborPrevMonthDiff = (int)$topCompareCurrentMetrics['labor_sum'] - (int)$topComparePrevMonthMetrics['labor_sum'];
-$topRatePrevMonthDiff = round((float)$topCompareCurrentMetrics['rate'] - (float)$topComparePrevMonthMetrics['rate'], 1);
+$topPrevMonthMm = monthly_metrics_excluding_holidays([$topComparePrevMonthDate], $topSalesCompareMap, $topLaborComparePeriod);
+$topPrevMonthSales = (int)($topSalesCompareMap[$topComparePrevMonthDate]['sales'] ?? 0);
+$topPrevMonthLabor = (int)($topLaborComparePeriod[$topComparePrevMonthDate] ?? 0);
+$topLaborPrevMonthDiff = $topLabor - $topPrevMonthLabor;
+$topRatePrevMonthDiff = round($topRate - (float)$topPrevMonthMm['rate'], 1);
 
 $topExpenseSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topKpiDate, $topKpiDate);
 $topExpenseHasSettings = (bool)($topExpenseSummary['has_settings'] ?? false);
@@ -909,15 +911,14 @@ $topMonthlyExpense = (int)($topExpenseSummary['monthly_total'] ?? 0);
 $topExpense = (int)($topExpenseSummary['total'] ?? 0);
 $topEstimatedProfit = $topSales - $topLabor - $topExpense;
 $topEstimatedProfitRate = ($topSales > 0) ? ($topEstimatedProfit / $topSales * 100.0) : null;
-$topExpenseCompareCurrentSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topCompareMonthStart, $topCompareDate);
-$topExpenseComparePrevMonthSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topComparePrevMonthStart, $topComparePrevMonthEnd);
+$topExpenseComparePrevMonthSummary = store_expenses_summary($pdo, $tenantId, $storeId, $topComparePrevMonthDate, $topComparePrevMonthDate);
+$topPrevMonthExpense = (int)($topExpenseComparePrevMonthSummary['total'] ?? 0);
 $topExpensePrevMonthDiff = $topExpenseHasSettings
-    ? ((int)($topExpenseCompareCurrentSummary['total'] ?? 0) - (int)($topExpenseComparePrevMonthSummary['total'] ?? 0))
+    ? ($topExpense - $topPrevMonthExpense)
     : null;
-$topEstimatedProfitCompareCurrent = (int)$topCompareCurrentMetrics['sales_sum'] - (int)$topCompareCurrentMetrics['labor_sum'] - (int)($topExpenseCompareCurrentSummary['total'] ?? 0);
-$topEstimatedProfitComparePrevMonth = (int)$topComparePrevMonthMetrics['sales_sum'] - (int)$topComparePrevMonthMetrics['labor_sum'] - (int)($topExpenseComparePrevMonthSummary['total'] ?? 0);
+$topEstimatedProfitComparePrevMonth = $topPrevMonthSales - $topPrevMonthLabor - $topPrevMonthExpense;
 $topEstimatedProfitPrevMonthDiff = $topExpenseHasSettings
-    ? ($topEstimatedProfitCompareCurrent - $topEstimatedProfitComparePrevMonth)
+    ? ($topEstimatedProfit - $topEstimatedProfitComparePrevMonth)
     : null;
 
 [$topColorKey, $topBadge] = labor_color_from_thresholds($topRate, $greenMax, $yellowMax);
@@ -929,8 +930,8 @@ $topKpiPayload = [
             'valueHtml' => number_format($topSales) . '<span class="kpiUnit">円</span>',
             'subHtml' => '平均：' . number_format($topSalesAvg) . '円/日',
             'compares' => [
-                ['text' => kpi_delta_text($topSalesPrevDayDiff, '円'), 'className' => kpi_delta_class($topSalesPrevDayDiff)],
-                ['text' => kpi_delta_text($topSalesPrevMonthDiff, '円'), 'className' => kpi_delta_class($topSalesPrevMonthDiff)],
+                ['label' => '前日比', 'text' => kpi_delta_text($topSalesPrevDayDiff, '円'), 'className' => kpi_delta_class($topSalesPrevDayDiff)],
+                ['label' => '前月同日比', 'text' => kpi_delta_text($topSalesPrevMonthDiff, '円'), 'className' => kpi_delta_class($topSalesPrevMonthDiff)],
             ],
         ],
         '来客数' => [
@@ -938,8 +939,8 @@ $topKpiPayload = [
             'subHtml' => '平均：' . ($topCustomersAvg !== null ? number_format($topCustomersAvg) . '人/日' : '-') .
                 ' / 客単価 ' . ($topAvgTicket !== null ? number_format($topAvgTicket) . '円' : '-'),
             'compares' => [
-                ['text' => kpi_delta_text($topCustomersPrevDayDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevDayDiff)],
-                ['text' => kpi_delta_text($topCustomersPrevMonthDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevMonthDiff)],
+                ['label' => '前日比', 'text' => kpi_delta_text($topCustomersPrevDayDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevDayDiff)],
+                ['label' => '前月同日比', 'text' => kpi_delta_text($topCustomersPrevMonthDiff, '人'), 'className' => kpi_delta_class($topCustomersPrevMonthDiff)],
             ],
         ],
         '経費（日割）' => [
@@ -948,7 +949,7 @@ $topKpiPayload = [
                 ? '固定：' . number_format($topFixedExpense) . '円 / 月別：' . number_format($topMonthlyExpense) . '円（期間按分）'
                 : '経費を登録すると利益を表示できます',
             'compares' => [
-                ['text' => kpi_delta_text($topExpensePrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topExpensePrevMonthDiff !== null ? (float)$topExpensePrevMonthDiff : null, true)],
+                ['label' => '前月同日比', 'text' => kpi_delta_text($topExpensePrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topExpensePrevMonthDiff !== null ? (float)$topExpensePrevMonthDiff : null, true)],
             ],
         ],
         '推定利益' => [
@@ -960,7 +961,7 @@ $topKpiPayload = [
             'badgeText' => $topExpenseHasSettings ? ($topEstimatedProfit < 0 ? '赤字' : '黒字') : '',
             'badgeClass' => $topExpenseHasSettings ? ($topEstimatedProfit < 0 ? 'bg-danger' : 'bg-success') : '',
             'compares' => [
-                ['text' => kpi_delta_text($topEstimatedProfitPrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topEstimatedProfitPrevMonthDiff !== null ? (float)$topEstimatedProfitPrevMonthDiff : null)],
+                ['label' => '前月同日比', 'text' => kpi_delta_text($topEstimatedProfitPrevMonthDiff, '円'), 'className' => kpi_delta_value_class($topEstimatedProfitPrevMonthDiff !== null ? (float)$topEstimatedProfitPrevMonthDiff : null)],
             ],
         ],
         '人件費' => [
@@ -968,7 +969,7 @@ $topKpiPayload = [
             'subHtml' => '平均：' . number_format($topLaborAvg) . '円/日' .
                 ($topLaborNightMonth > 0 ? ' <span class="sub deepNightSub">深割: +' . number_format((int)$topLaborNightMonth) . '</span>' : ''),
             'compares' => [
-                ['text' => kpi_delta_text($topLaborPrevMonthDiff, '円'), 'className' => kpi_delta_value_class((float)$topLaborPrevMonthDiff, true)],
+                ['label' => '前月同日比', 'text' => kpi_delta_text($topLaborPrevMonthDiff, '円'), 'className' => kpi_delta_value_class((float)$topLaborPrevMonthDiff, true)],
             ],
         ],
         '人件費率' => [
@@ -979,7 +980,7 @@ $topKpiPayload = [
             'detailHtml' => '基準：適正 ≤ ' . number_format($greenMax, 2) . '% / 注意 ≤ ' . number_format($yellowMax, 2) . '%' .
                 (!empty($topAnomalyDays) ? '<br><span style="color:#b3261e;">未連携の疑いあり</span>' : ''),
             'compares' => [
-                ['text' => kpi_delta_float_text((float)$topRatePrevMonthDiff, 'pt', 1), 'className' => kpi_delta_value_class((float)$topRatePrevMonthDiff, true)],
+                ['label' => '前月同日比', 'text' => kpi_delta_float_text((float)$topRatePrevMonthDiff, 'pt', 1), 'className' => kpi_delta_value_class((float)$topRatePrevMonthDiff, true)],
             ],
         ],
     ],
@@ -3192,6 +3193,13 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         width: 100%;
     }
 
+    body.adminHomeDashboard #dailyTable .table thead,
+    body.adminHomeDashboard #dailyTable .table thead th {
+        position: static !important;
+        top: auto !important;
+        z-index: auto !important;
+    }
+
     body.adminHomeDashboard:not(.adminHomeDark) {
         background: #ffffff;
     }
@@ -4730,8 +4738,15 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                     }
                 }
 
+                const compareRows = Array.from(card.querySelectorAll('.kpiCompareRow'));
                 const compareValues = Array.from(card.querySelectorAll('.kpiCompareValue'));
                 (data.compares || []).forEach((compare, index) => {
+                    const row = compareRows[index];
+                    const label = row?.querySelector('.kpiCompareLabel');
+                    if (label && typeof compare.label === 'string') {
+                        label.textContent = compare.label;
+                    }
+
                     const el = compareValues[index];
                     if (!el) return;
                     el.textContent = compare.text || '-';
@@ -5294,6 +5309,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
         const tableWrap = document.querySelector('.tableWrap');
         const tabsBar = document.querySelector('.tabsBar');
         if (!table || !tableWrap) return;
+        if (tableWrap.closest('#dailyTable')) return;
 
         const wrap = document.createElement('div');
         wrap.className = 'tableStickyWrap';

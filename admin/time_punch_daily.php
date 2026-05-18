@@ -67,11 +67,13 @@ if ($dbFile === null) {
 }
 require_once $dbFile;
 require_once __DIR__ . '/../lib/punch_source.php';
+require_once __DIR__ . '/../lib/punch_capture.php';
 
 $pdo = db();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 punch_source_ensure_column($pdo);
+punch_capture_ensure_columns($pdo);
 
 // ===== helpers =====
 function h(string $s): string
@@ -240,6 +242,58 @@ function timeWithPunchSourceHtml(?int $ts, int $unitMinutes, string $punchType, 
         return $timeHtml;
     }
     return '<span class="timeWithSource"><span class="timeWithSourceLabel">' . $timeHtml . '</span>' . $iconHtml . '</span>';
+}
+
+function punchFacePhotoHtml(int $punchId, ?string $photoPath): string
+{
+    $photoPath = trim((string)$photoPath);
+    if ($punchId <= 0 || $photoPath === '') {
+        return '<span class="muted">-</span>';
+    }
+    $url = '/admin/punch_photo.php?id=' . $punchId;
+    return '<a class="punchFaceLink" href="' . h($url) . '" target="_blank" rel="noopener">'
+        . '<img class="punchFaceThumb" src="' . h($url) . '" alt="顔写真" loading="lazy">'
+        . '</a>';
+}
+
+function punchLocationHtml($lat, $lng, $accuracy, ?string $address = null): string
+{
+    if ($lat === null || $lng === null || $lat === '' || $lng === '') {
+        return '<span class="muted">-</span>';
+    }
+    if (!is_numeric($lat) || !is_numeric($lng)) {
+        return '<span class="muted">-</span>';
+    }
+    $latF = (float)$lat;
+    $lngF = (float)$lng;
+    $coordsLabel = number_format($latF, 6, '.', '') . ', ' . number_format($lngF, 6, '.', '');
+    $label = trim((string)$address);
+    if ($label === '') {
+        $label = $coordsLabel;
+    }
+    $accLabel = '';
+    if ($accuracy !== null && $accuracy !== '' && is_numeric($accuracy)) {
+        $accLabel = '精度 ' . number_format((float)$accuracy, 0) . 'm';
+    }
+    $mapUrl = 'https://www.google.com/maps?q=' . rawurlencode((string)$latF . ',' . (string)$lngF);
+    return '<a class="punchLocationLink" href="' . h($mapUrl) . '" target="_blank" rel="noopener">'
+        . '<span>' . h($label) . '</span>'
+        . ($label !== $coordsLabel ? '<span class="sub">' . h($coordsLabel) . '</span>' : '')
+        . ($accLabel !== '' ? '<span class="sub">' . h($accLabel) . '</span>' : '')
+        . '</a>';
+}
+
+function punchLocationText($lat, $lng, $accuracy, ?string $address = null): string
+{
+    if ($lat === null || $lng === null || $lat === '' || $lng === '') return '-';
+    if (!is_numeric($lat) || !is_numeric($lng)) return '-';
+    $coordsLabel = number_format((float)$lat, 6, '.', '') . ', ' . number_format((float)$lng, 6, '.', '');
+    $address = trim((string)$address);
+    $label = $address !== '' ? ($address . ' / ' . $coordsLabel) : $coordsLabel;
+    if ($accuracy !== null && $accuracy !== '' && is_numeric($accuracy)) {
+        $label .= ' / 精度 ' . number_format((float)$accuracy, 0) . 'm';
+    }
+    return $label;
 }
 
 /**
@@ -532,6 +586,12 @@ function buildSessions(array $rows, int $roundUnit, array $typeJa, int $cutoffSe
                 'warn' => [],
                 'clock_in_source' => '',
                 'clock_out_source' => '',
+                'clock_in_face_photo_path' => '',
+                'clock_in_latitude' => null,
+                'clock_in_longitude' => null,
+                'clock_in_location_accuracy_m' => null,
+                'clock_in_location_captured_at' => null,
+                'clock_in_location_address' => '',
                 '_display_in_ts' => null,
                 '_display_out_ts' => null,
                 '_edit_clock_in_id' => 0,
@@ -580,6 +640,12 @@ function buildSessions(array $rows, int $roundUnit, array $typeJa, int $cutoffSe
                     $sessions[$key]['_display_in_ts'] = $tsRaw;
                     $sessions[$key]['_edit_clock_in_id'] = $id;
                     $sessions[$key]['clock_in_source'] = punch_source_infer_from_row($r);
+                    $sessions[$key]['clock_in_face_photo_path'] = (string)($r['punch_face_photo_path'] ?? '');
+                    $sessions[$key]['clock_in_latitude'] = $r['punch_latitude'] ?? null;
+                    $sessions[$key]['clock_in_longitude'] = $r['punch_longitude'] ?? null;
+                    $sessions[$key]['clock_in_location_accuracy_m'] = $r['punch_location_accuracy_m'] ?? null;
+                    $sessions[$key]['clock_in_location_captured_at'] = $r['punch_location_captured_at'] ?? null;
+                    $sessions[$key]['clock_in_location_address'] = (string)($r['punch_location_address'] ?? '');
                 }
 
                 $sessions[$key]['_open_in_calc'] = $tsCalc;
@@ -1333,6 +1399,21 @@ try {
 
 // ===== raw punches =====
 $params = [':tenant_id' => $tenantId, ':store_id' => $storeId, ':start_dt' => $startDt, ':end_dt' => $endDt];
+$tpColsForSelect = tableColumns($pdo, 'time_punches');
+$captureSelectParts = [];
+foreach ([
+    'punch_face_photo_path',
+    'punch_latitude',
+    'punch_longitude',
+    'punch_location_accuracy_m',
+    'punch_location_captured_at',
+    'punch_location_address',
+] as $captureCol) {
+    $captureSelectParts[] = in_array($captureCol, $tpColsForSelect, true)
+        ? "tp.`{$captureCol}`"
+        : "NULL AS `{$captureCol}`";
+}
+$captureSelectSql = implode(",\n         ", $captureSelectParts);
 $whereEmp = "";
 if ($employeeId > 0) {
     $whereEmp = " AND tp.employee_id = :employee_id ";
@@ -1351,6 +1432,7 @@ if ($employeeId === 0 && $empScope !== 'all' && !empty($scopeEmpIds)) {
 $stmt = $pdo->prepare("
   SELECT tp.employee_id, e.display_name, tp.punch_type, tp.punched_at, tp.id,
          tp.device_id, tp.punch_source, tp.source,
+         {$captureSelectSql},
          COALESCE(d.device_name, '') AS device_name
   FROM time_punches tp
   JOIN employees e
@@ -1369,6 +1451,48 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+
+if (in_array('punch_location_address', $tpColsForSelect, true)) {
+    $resolvedCount = 0;
+    $lookupCount = 0;
+    foreach ($rows as $idx => $r) {
+        if ($lookupCount >= 3 || $resolvedCount >= 3) {
+            break;
+        }
+        if ((string)($r['punch_type'] ?? '') !== 'clock_in') {
+            continue;
+        }
+        $lat = $r['punch_latitude'] ?? null;
+        $lng = $r['punch_longitude'] ?? null;
+        $address = trim((string)($r['punch_location_address'] ?? ''));
+        if ($address !== '' || !is_numeric($lat) || !is_numeric($lng)) {
+            continue;
+        }
+
+        $lookupCount++;
+        $resolved = punch_capture_reverse_geocode((float)$lat, (float)$lng);
+        if ($resolved === null || $resolved === '') {
+            break;
+        }
+
+        $upd = $pdo->prepare("
+            UPDATE time_punches
+            SET punch_location_address = :address
+            WHERE tenant_id = :tenant_id
+              AND store_id = :store_id
+              AND id = :id
+            LIMIT 1
+        ");
+        $upd->execute([
+            ':address' => $resolved,
+            ':tenant_id' => $tenantId,
+            ':store_id' => $storeId,
+            ':id' => (int)($r['id'] ?? 0),
+        ]);
+        $rows[$idx]['punch_location_address'] = $resolved;
+        $resolvedCount++;
+    }
+}
 
 // break_punches を混ぜる（そのまま）
 try {
@@ -1615,6 +1739,8 @@ if ($export === 'csv' || $export === 'pdf') {
             '従業員' => (string)$d['display_name'],
             '出勤' => fmtTimeRawAndRounded($inTs, $roundUnit, 'clock_in'),
             '退勤' => fmtTimeRawAndRounded($outTs, $roundUnit, 'clock_out'),
+            '顔写真' => ((string)($d['clock_in_face_photo_path'] ?? '') !== '') ? 'あり' : '-',
+            '位置情報' => punchLocationText($d['clock_in_latitude'] ?? null, $d['clock_in_longitude'] ?? null, $d['clock_in_location_accuracy_m'] ?? null, (string)($d['clock_in_location_address'] ?? '')),
             '打刻元' => punch_source_summary((string)($d['clock_in_source'] ?? ''), (string)($d['clock_out_source'] ?? '')),
             '勤務' => secToHM($work),
             '休憩' => secToHM($break),
@@ -1648,6 +1774,8 @@ if ($export === 'csv' || $export === 'pdf') {
             . '<td>' . h($r['従業員']) . '</td>'
             . '<td>' . h($r['出勤']) . '</td>'
             . '<td>' . h($r['退勤']) . '</td>'
+            . '<td>' . h($r['顔写真']) . '</td>'
+            . '<td>' . h($r['位置情報']) . '</td>'
             . '<td>' . h($r['打刻元']) . '</td>'
             . '<td>' . h($r['勤務']) . '</td>'
             . '<td>' . h($r['休憩']) . '</td>'
@@ -1665,7 +1793,7 @@ if ($export === 'csv' || $export === 'pdf') {
         . 'th{background:#f5f5f5;}</style></head><body>'
         . '<h3>勤怠（日次） ' . h($from) . ' 〜 ' . h($to) . '</h3>'
         . '<table><thead><tr>'
-        . '<th>営業日時</th><th>従業員</th><th>出勤</th><th>退勤</th><th>打刻元</th><th>勤務</th>'
+        . '<th>営業日時</th><th>従業員</th><th>出勤</th><th>退勤</th><th>顔写真</th><th>位置情報</th><th>打刻元</th><th>勤務</th>'
         . '<th>休憩</th><th>実働</th><th>日給</th><th>支払状況</th><th>打刻入力</th>'
         . '</tr></thead><tbody>' . $rowsHtml . '</tbody></table></body></html>';
 
@@ -1965,6 +2093,7 @@ $quickAddTimeOptions = buildTimeOptions(5);
 
         table {
             width: 100%;
+            min-width: 1620px;
             border-collapse: collapse;
             table-layout: fixed;
         }
@@ -1986,7 +2115,7 @@ $quickAddTimeOptions = buildTimeOptions(5);
 
         .tpDaily thead th:nth-child(n+2),
         .tpDaily tbody td:nth-child(n+2) {
-            width: calc((100% - 36px) / 12);
+            width: calc((100% - 36px) / 14);
         }
 
         thead th:first-child,
@@ -2306,6 +2435,41 @@ $quickAddTimeOptions = buildTimeOptions(5);
             font-weight: 700;
             font-size: 14px;
             text-align: right;
+        }
+
+        .tpDaily .punchFaceLink {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tpDaily .punchFaceThumb {
+            width: 44px;
+            height: 44px;
+            border-radius: 999px;
+            object-fit: cover;
+            border: 1px solid rgba(15, 23, 42, .14);
+            background: #f8fafc;
+        }
+
+        .tpDaily .punchLocationLink {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 2px;
+            max-width: 100%;
+            color: #0f766e;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.25;
+            text-decoration: none;
+        }
+
+        .tpDaily .faceCell {
+            text-align: center;
+        }
+
+        .tpDaily .locationCell {
+            white-space: normal;
         }
 
         .dayPayWrap {
@@ -2972,6 +3136,8 @@ $quickAddTimeOptions = buildTimeOptions(5);
                             <th>従 業 員</th>
                             <th>出 勤</th>
                             <th>退 勤</th>
+                            <th>顔 写 真</th>
+                            <th>位 置 情 報</th>
                             <th>勤 務</th>
                             <th>休 憩</th>
                             <th>実 働</th>
@@ -2986,7 +3152,7 @@ $quickAddTimeOptions = buildTimeOptions(5);
                     <tbody>
                         <?php if (empty($items)): ?>
                             <tr>
-                                <td colspan="13" class="muted">該当データなし</td>
+                                <td colspan="15" class="muted">該当データなし</td>
                             </tr>
                         <?php else: ?>
                             <?php $backUrl = '/admin/time_punch_daily.php?' . http_build_query($baseQuery); ?>
@@ -3086,6 +3252,8 @@ $quickAddTimeOptions = buildTimeOptions(5);
 
                                     <td class="num timeCell punchTimeCell"><?= timeWithPunchSourceHtml($inTs, $roundUnit, 'clock_in', (string)($d['clock_in_source'] ?? '')) ?></td>
                                     <td class="num timeCell punchTimeCell"><?= timeWithPunchSourceHtml($outTs, $roundUnit, 'clock_out', (string)($d['clock_out_source'] ?? '')) ?></td>
+                                    <td class="faceCell"><?= punchFacePhotoHtml((int)$d['_edit_clock_in_id'], (string)($d['clock_in_face_photo_path'] ?? '')) ?></td>
+                                    <td class="locationCell"><?= punchLocationHtml($d['clock_in_latitude'] ?? null, $d['clock_in_longitude'] ?? null, $d['clock_in_location_accuracy_m'] ?? null, (string)($d['clock_in_location_address'] ?? '')) ?></td>
 
                                     <td class="num timeCell"><?= h(secToHM($work)) ?></td>
                                     <td class="num timeCell"><?= h(secToHM($break)) ?></td>
@@ -3148,7 +3316,7 @@ $quickAddTimeOptions = buildTimeOptions(5);
                     <?php if (!empty($items)): ?>
                         <tfoot>
                             <tr>
-                                <td colspan="5" style="text-align:right;">合計</td>
+                                <td colspan="7" style="text-align:right;">合計</td>
                                 <td class="num"><?= h(secToHM($totalWorkSec)) ?></td>
                                 <td class="num"><?= h(secToHM($totalBreakSec)) ?></td>
                                 <td class="num"><?= h(secToHM($totalNetSec)) ?></td>
@@ -3262,6 +3430,14 @@ $quickAddTimeOptions = buildTimeOptions(5);
                                     <span class="tpCardKey">退勤</span>
                                     <span
                                         class="num timeCell punchTimeCell"><?= timeWithPunchSourceHtml($outTs, $roundUnit, 'clock_out', (string)($d['clock_out_source'] ?? '')) ?></span>
+                                </div>
+                                <div class="tpCardRow">
+                                    <span class="tpCardKey">顔写真</span>
+                                    <span><?= punchFacePhotoHtml((int)$d['_edit_clock_in_id'], (string)($d['clock_in_face_photo_path'] ?? '')) ?></span>
+                                </div>
+                                <div class="tpCardRow">
+                                    <span class="tpCardKey">位置情報</span>
+                                    <span><?= punchLocationHtml($d['clock_in_latitude'] ?? null, $d['clock_in_longitude'] ?? null, $d['clock_in_location_accuracy_m'] ?? null, (string)($d['clock_in_location_address'] ?? '')) ?></span>
                                 </div>
                                 <div class="tpCardRow">
                                     <span class="tpCardKey">勤務/休憩/実働</span>

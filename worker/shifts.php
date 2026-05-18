@@ -358,7 +358,7 @@ if ($lastPunchType === 'clock_in') {
     $statusClass = 'out';
 }
 $statusTime = ($lastPunchAt !== '') ? date('H:i', strtotime($lastPunchAt)) : '—';
-$qrButtonLabel = 'QRで出退勤';
+$qrButtonLabel = '顔写真で出退勤';
 
 // ===== 出勤履歴（過去12ヶ月） =====
 $historyMonths = [];
@@ -1612,7 +1612,7 @@ foreach ($attendanceByDay as $dayKey => $pack) {
 
                 <div class="qrAction">
                     <button class="qrButton" type="button" id="openQrScan"><?= h($qrButtonLabel) ?></button>
-                    <div class="qrStatus" id="qrStatus">読み取り後、出勤/退勤が自動で記録されます。</div>
+                    <div class="qrStatus" id="qrStatus">出勤時は顔写真と位置情報を取得して記録します。</div>
                 </div>
 
                 <?php if ($salesPromptEnabled && $salesNoticeMissingDays): ?>
@@ -1810,9 +1810,10 @@ foreach ($attendanceByDay as $dayKey => $pack) {
 
     <div class="qrModal" id="qrModal" aria-hidden="true">
         <div class="qrPanel">
-            <div class="qrHead">QRを読み取ってください</div>
+            <div class="qrHead">顔写真を撮影してください</div>
             <video class="qrVideo" id="qrVideo" playsinline></video>
-            <div class="qrHint" id="qrHint">カメラをQRに向けてください。</div>
+            <div class="qrHint" id="qrHint">顔が画面内に入るようにしてください。</div>
+            <button type="button" class="qrButton" id="captureFacePunch">撮影して出勤</button>
             <button type="button" class="navBtn" id="closeQrScan">閉じる</button>
         </div>
     </div>
@@ -2101,7 +2102,6 @@ foreach ($attendanceByDay as $dayKey => $pack) {
         })();
     </script>
 
-    <script src="/assets/jsqr.min.js"></script>
     <script>
         (() => {
             const openBtn = document.getElementById('openQrScan');
@@ -2109,6 +2109,7 @@ foreach ($attendanceByDay as $dayKey => $pack) {
             const video = document.getElementById('qrVideo');
             const hint = document.getElementById('qrHint');
             const closeBtn = document.getElementById('closeQrScan');
+            const captureBtn = document.getElementById('captureFacePunch');
             const statusEl = document.getElementById('qrStatus');
             const salesModal = document.getElementById('salesModal');
             const salesModalTitle = document.getElementById('salesModalTitle');
@@ -2124,8 +2125,7 @@ foreach ($attendanceByDay as $dayKey => $pack) {
             const formatLabel = window.formatSalesDateLabel || ((date) => date);
             let salesBusinessDate = '';
             let stream = null;
-            let detector = null;
-            let scanning = false;
+            let pendingLocation = null;
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
@@ -2169,6 +2169,7 @@ foreach ($attendanceByDay as $dayKey => $pack) {
                 const state = type === 'clock_out' ? 'out' : 'in';
                 box.classList.remove('in', 'out', 'none');
                 box.classList.add(state);
+                box.dataset.state = state;
                 val.textContent = type === 'clock_out' ? '退勤済' : '出勤中';
                 time.textContent = `最終打刻 ${timeStr || '—'}`;
             }
@@ -2232,32 +2233,57 @@ foreach ($attendanceByDay as $dayKey => $pack) {
             }
 
             function stopScan() {
-                scanning = false;
                 if (stream) {
                     stream.getTracks().forEach((t) => t.stop());
                     stream = null;
                 }
-                if (modal) modal.classList.remove('active');
-            }
-
-            function extractToken(raw) {
-                if (!raw) return '';
-                const str = String(raw).trim();
-                if (!str) return '';
-                if (str.includes('token=')) {
-                    try {
-                        const url = new URL(str);
-                        return url.searchParams.get('token') || '';
-                    } catch (e) {
-                        const m = str.match(/token=([A-Za-z0-9_-]+)/);
-                        return m ? m[1] : '';
-                    }
+                pendingLocation = null;
+                if (modal) {
+                    modal.classList.remove('active');
+                    modal.setAttribute('aria-hidden', 'true');
                 }
-                const m = str.match(/^[A-Za-z0-9_-]{8,}$/);
-                return m ? str : '';
             }
 
-            async function sendToken(token) {
+            function currentPunchState() {
+                const box = document.getElementById('punchState');
+                return box ? String(box.dataset.state || '') : '';
+            }
+
+            function getCurrentLocation() {
+                return new Promise((resolve, reject) => {
+                    if (!navigator.geolocation) {
+                        reject(new Error('この端末では位置情報を取得できません。'));
+                        return;
+                    }
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => resolve({
+                            latitude: pos.coords.latitude,
+                            longitude: pos.coords.longitude,
+                            location_accuracy_m: pos.coords.accuracy
+                        }),
+                        () => reject(new Error('位置情報の取得を許可してください。')),
+                        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+                    );
+                });
+            }
+
+            function captureFacePhoto() {
+                if (!video || !ctx) throw new Error('顔写真を撮影できません。');
+                const srcW = video.videoWidth || 0;
+                const srcH = video.videoHeight || 0;
+                if (srcW <= 0 || srcH <= 0) throw new Error('カメラ映像を取得できません。');
+
+                const maxW = 720;
+                const scale = Math.min(1, maxW / srcW);
+                const w = Math.max(1, Math.round(srcW * scale));
+                const h = Math.max(1, Math.round(srcH * scale));
+                canvas.width = w;
+                canvas.height = h;
+                ctx.drawImage(video, 0, 0, w, h);
+                return canvas.toDataURL('image/jpeg', 0.82);
+            }
+
+            async function sendPunch(payload = {}) {
                 try {
                     const res = await fetch('/worker/qr_clock.php', {
                         method: 'POST',
@@ -2265,9 +2291,7 @@ foreach ($attendanceByDay as $dayKey => $pack) {
                             'Content-Type': 'application/json'
                         },
                         credentials: 'same-origin',
-                        body: JSON.stringify({
-                            token
-                        })
+                        body: JSON.stringify(payload)
                     });
                     const data = await res.json();
                     if (!data.ok) {
@@ -2291,26 +2315,24 @@ foreach ($attendanceByDay as $dayKey => $pack) {
             }
 
             async function startScan() {
+                const nextIsClockIn = currentPunchState() !== 'in';
+                if (!nextIsClockIn) {
+                    await sendPunch({});
+                    return;
+                }
+
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     setStatus('この端末ではカメラを使用できません。', true);
                     return;
                 }
-                const hasNativeDetector = ('BarcodeDetector' in window);
-                const hasJsQR = (typeof window.jsQR === 'function');
-                if (!hasNativeDetector && !hasJsQR) {
-                    setStatus('この端末はQR読み取りに未対応です。', true);
-                    return;
-                }
-                if (hasNativeDetector) {
-                    detector = new BarcodeDetector({
-                        formats: ['qr_code']
-                    });
-                }
                 try {
+                    setStatus('位置情報を取得しています...');
+                    pendingLocation = await getCurrentLocation();
+                    setStatus('カメラを起動しています...');
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: {
                             facingMode: {
-                                ideal: 'environment'
+                                ideal: 'user'
                             }
                         },
                         audio: false
@@ -2318,55 +2340,13 @@ foreach ($attendanceByDay as $dayKey => $pack) {
                     video.srcObject = stream;
                     video.setAttribute('playsinline', 'true');
                     await video.play();
-                    scanning = true;
                     modal.classList.add('active');
-                    hint.textContent = 'カメラをQRに向けてください。';
-                    const tick = async () => {
-                        if (!scanning) return;
-                        try {
-                            if (detector) {
-                                const codes = await detector.detect(video);
-                                if (codes && codes.length) {
-                                    scanning = false;
-                                    const token = extractToken(codes[0].rawValue || '');
-                                    stopScan();
-                                    if (!token) {
-                                        setStatus('QRが読み取れませんでした。', true);
-                                        return;
-                                    }
-                                    await sendToken(token);
-                                    return;
-                                }
-                            } else if (hasJsQR && ctx) {
-                                const w = video.videoWidth || 0;
-                                const h = video.videoHeight || 0;
-                                if (w > 0 && h > 0) {
-                                    canvas.width = w;
-                                    canvas.height = h;
-                                    ctx.drawImage(video, 0, 0, w, h);
-                                    const img = ctx.getImageData(0, 0, w, h);
-                                    const code = window.jsQR(img.data, w, h);
-                                    if (code && code.data) {
-                                        scanning = false;
-                                        const token = extractToken(code.data);
-                                        stopScan();
-                                        if (!token) {
-                                            setStatus('QRが読み取れませんでした。', true);
-                                            return;
-                                        }
-                                        await sendToken(token);
-                                        return;
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            // ignore scan errors
-                        }
-                        requestAnimationFrame(tick);
-                    };
-                    requestAnimationFrame(tick);
+                    modal.setAttribute('aria-hidden', 'false');
+                    hint.textContent = '顔が画面内に入ったら「撮影して出勤」を押してください。';
+                    setStatus('顔写真を撮影してください。');
                 } catch (e) {
-                    setStatus('カメラの起動に失敗しました。', true);
+                    stopScan();
+                    setStatus(e && e.message ? e.message : 'カメラまたは位置情報の取得に失敗しました。', true);
                 }
             }
 
@@ -2378,6 +2358,26 @@ foreach ($attendanceByDay as $dayKey => $pack) {
             if (closeBtn) {
                 closeBtn.addEventListener('click', () => {
                     stopScan();
+                });
+            }
+            if (captureBtn) {
+                captureBtn.addEventListener('click', async () => {
+                    try {
+                        captureBtn.disabled = true;
+                        const facePhoto = captureFacePhoto();
+                        const location = pendingLocation || await getCurrentLocation();
+                        stopScan();
+                        await sendPunch({
+                            face_photo_data: facePhoto,
+                            latitude: location.latitude,
+                            longitude: location.longitude,
+                            location_accuracy_m: location.location_accuracy_m
+                        });
+                    } catch (e) {
+                        setStatus(e && e.message ? e.message : '撮影に失敗しました。', true);
+                    } finally {
+                        captureBtn.disabled = false;
+                    }
                 });
             }
 
