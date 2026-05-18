@@ -7,7 +7,7 @@ declare(strict_types=1);
  * ✅ 書き込み場所: 既存の /admin/index.php を「丸ごと置き換え」
  *
  * ✅ 今回の修正（あなたの要望）
- * - 一覧を月単位（YYYY年MM度）のプルダウンで切り替え可能にする
+ * - 一覧を月単位（YYYY年MM月）のプルダウンで切り替え可能にする
  * - 初期表示は当月
  * - KPI/テーブル/チャートの期間を、選択した期間に揃える
  * - 打刻調整は店舗設定の値を使用し、store_id も維持
@@ -303,7 +303,7 @@ $periodOptions = [];
 for ($i = 0; $i < 12; $i++) {
     $dt = $businessNow->modify("-{$i} month");
     $ym = $dt->format('Y-m');
-    $label = $dt->format('Y年m月') . '度';
+    $label = $dt->format('Y年m月');
     $periodOptions[] = ['value' => "ym:{$ym}", 'label' => $label];
 }
 
@@ -328,7 +328,7 @@ $periodEnd   = $dtFirst->modify('last day of this month')->format('Y-m-d');
 if ($dtFirst->format('Y-m') === substr($businessToday, 0, 7) && $periodEnd > $businessToday) {
     $periodEnd = $businessToday;
 }
-$periodTitle = $dtFirst->format('Y年m月') . '度';
+$periodTitle = $dtFirst->format('Y年m月');
 
 $kpiDateInputValue = valid_ymd_param($selectedKpiDate) ? $selectedKpiDate : $businessToday;
 
@@ -921,9 +921,10 @@ $topEstimatedProfitPrevMonthDiff = $topExpenseHasSettings
     : null;
 
 [$topColorKey, $topBadge] = labor_color_from_thresholds($topRate, $greenMax, $yellowMax);
+$topKpiTitleLabel = ($topKpiDate === $businessToday) ? '今日' : $topKpiDt->format('Y年m月d日');
 
 $topKpiPayload = [
-    'title' => '📊 店舗情報（' . $topKpiDt->format('Y年m月d日') . '）',
+    'title' => '📊 店舗情報（' . $topKpiTitleLabel . '）',
     'cards' => [
         '売上' => [
             'valueHtml' => number_format($topSales) . '<span class="kpiUnit">円</span>',
@@ -3822,7 +3823,7 @@ function svg_rate_chart_30days(array $dates, array $salesMap, array $laborMap, f
                 <section class="tabPanel isActive" data-panel="dash" role="tabpanel" aria-label="ダッシュボード">
                     <div>
                         <div class="cardHead">
-                            <div class="cardHeadTitle">📊 店舗情報（<?= h($topKpiDt->format('Y年m月d日')) ?>）</div>
+                            <div class="cardHeadTitle">📊 店舗情報（<?= h($topKpiTitleLabel) ?>）</div>
                             <form class="filters kpiFilters" method="get" action="/admin/index.php" id="periodFilterForm">
                                 <input type="hidden" name="store_id" value="<?= (int)$storeId ?>">
                                 <input type="hidden" name="kpi_date" value="<?= h($kpiDateInputValue) ?>">
