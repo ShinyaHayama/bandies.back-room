@@ -6,6 +6,7 @@ require_once __DIR__ . '/_auth.php';
 require_admin_login();
 require_once __DIR__ . '/_tenant_context.php';
 require_once __DIR__ . '/../lib/stripe.php';
+require_once __DIR__ . '/../lib/app_url.php';
 
 if (!isset($tenantId) || (int)$tenantId <= 0) {
     header('Location: /admin/login.php');
@@ -159,8 +160,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'mode' => 'subscription',
                     'customer' => $customerId,
                     'client_reference_id' => (string)$tenantId,
-                    'success_url' => 'https://' . $_SERVER['HTTP_HOST'] . '/admin/account.php?billing=success',
-                    'cancel_url' => 'https://' . $_SERVER['HTTP_HOST'] . '/admin/account.php?billing=cancel',
+                    'success_url' => app_public_url('/admin/account.php?billing=success'),
+                    'cancel_url' => app_public_url('/admin/account.php?billing=cancel'),
                     'line_items[0][price]' => $catalog['base_price_id'],
                     'line_items[0][quantity]' => 1,
                     'line_items[1][price]' => $catalog['seat_price_id'],

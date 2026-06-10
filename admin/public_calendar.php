@@ -5,6 +5,7 @@ require_once __DIR__ . '/_auth.php';
 require_admin_login();
 require_once __DIR__ . '/_tenant_context.php';
 require_once __DIR__ . '/../api/lib/db.php';
+require_once __DIR__ . '/../lib/app_url.php';
 
 $pdo = db();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -226,7 +227,7 @@ if ((string)($currentStore['public_calendar_code'] ?? '') === '') {
 $publicCalendarEnabled = (int)($currentStore['public_calendar_enabled'] ?? 0) === 1;
 $publicCalendarTitle = (string)($currentStore['public_calendar_title'] ?? '');
 $publicCalendarCode = (string)($currentStore['public_calendar_code'] ?? '');
-$publicCalendarHost = (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off' ? 'http' : 'https') . '://' . ($_SERVER['HTTP_HOST'] ?? 'shimenavi.com');
+$publicCalendarHost = app_public_base_url();
 $publicCalendarUrl = $publicCalendarHost . '/c/' . rawurlencode($publicCalendarCode);
 
 $monthStatus = [];

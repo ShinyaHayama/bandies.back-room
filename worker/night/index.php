@@ -33,8 +33,8 @@ function h(string $s): string
 }
 
 /** ✅ 申込リンク（無料お試しページ） */
-$trialUrl = 'https://shimenavi.com/trial.php';
-$aiDemoUrl = 'https://shimenavi.com/night/ai_demo.php';
+$trialUrl = 'http://bandies.back-room.me/trial.php';
+$aiDemoUrl = 'http://bandies.back-room.me/night/ai_demo.php';
 
 // images（night配下のみ参照）
 $heroImg = '/night/assets/img/hero.png';
@@ -1027,7 +1027,7 @@ $logoMainCssUrl = $logoMain . '?v=' . date('YmdHis');
                 <a href="<?= h($aiDemoUrl) ?>">AI体験</a>
                 <a href="#pricing">料金</a>
                 <a href="#contact">お問い合わせ</a>
-                <a href="https://shimenavi.com/admin/login.php">管理者ログイン</a>
+                <a href="http://bandies.back-room.me/admin/login.php">管理者ログイン</a>
             </nav>
 
             <a class="btn btnPrimary btnSm" href="<?= h($trialUrl) ?>">無料で試してみる</a>
@@ -1321,9 +1321,9 @@ $logoMainCssUrl = $logoMain . '?v=' . date('YmdHis');
         </div>
         <div class="wrap footerLinks">
             <a href="https://fader.group/" target="_blank" rel="noopener">運営会社</a>
-            <a href="https://shimenavi.com/terms.php">利用規約</a>
-            <a href="https://shimenavi.com/privacy.php">個人情報の取り扱い</a>
-            <a href="https://shimenavi.com/tokusho.php">特定商取引法に基づく表記</a>
+            <a href="http://bandies.back-room.me/terms.php">利用規約</a>
+            <a href="http://bandies.back-room.me/privacy.php">個人情報の取り扱い</a>
+            <a href="http://bandies.back-room.me/tokusho.php">特定商取引法に基づく表記</a>
         </div>
         <div class="wrap copy">© <?= date('Y') ?> シメナビ. All rights reserved.</div>
     </footer>

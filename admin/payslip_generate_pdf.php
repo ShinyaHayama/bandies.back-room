@@ -9,6 +9,7 @@ require_once __DIR__ . '/_auth.php';
  */
 
 require_once __DIR__ . '/../vendor/autoload.php'; // composerのvendor位置に合わせて調整
+require_once __DIR__ . '/../lib/app_url.php';
 use Dompdf\Dompdf;
 use Dompdf\Options;
 
@@ -438,15 +439,14 @@ foreach ($dailyNetSec as $day => $sec) {
 $netPay = $grossPay;
 
 // 明細HTMLは既存の表示ページを流用（=同じ内容をPDF化できる）
-$payslipUrl = sprintf(
-    'https://%s/admin/payslip_view.php?tenant_id=%d&store_id=%d&employee_id=%d&ym=%s&round15=%d',
-    $_SERVER['HTTP_HOST'],
+$payslipUrl = app_public_url(sprintf(
+    '/admin/payslip_view.php?tenant_id=%d&store_id=%d&employee_id=%d&ym=%s&round15=%d',
     $tenantId,
     $storeId,
     $employeeId,
     urlencode($ym),
     $round15
-);
+));
 
 // サーバ内HTTPでHTML取得（allow_url_fopenがOFFならcurlに切替）
 $html = @file_get_contents($payslipUrl);

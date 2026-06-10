@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/app_url.php';
+
 function shift_leave_requests_ensure_schema(PDO $pdo): void
 {
     try {
@@ -44,10 +46,7 @@ function shift_leave_requests_valid_date(string $date): bool
 
 function shift_leave_requests_base_url(): string
 {
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-    $scheme = $https ? 'https' : 'http';
-    $host = (string)($_SERVER['HTTP_HOST'] ?? 'shimenavi.com');
-    return $scheme . '://' . $host;
+    return app_public_base_url();
 }
 
 function shift_leave_requests_admin_emails(PDO $pdo, int $tenantId, int $storeId): array

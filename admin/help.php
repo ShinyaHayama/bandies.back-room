@@ -7,6 +7,7 @@ require_admin_login();
 
 require_once __DIR__ . '/_tenant_context.php';
 require_once __DIR__ . '/../lib/mailer.php';
+require_once __DIR__ . '/../lib/app_url.php';
 if (!isset($tenantId) || (int)$tenantId <= 0) {
     header('Location: /admin/login.php');
     exit;
@@ -328,10 +329,7 @@ function send_new_help_mail(PDO $pdo, int $tenantId, int $storeId, int $threadId
         $st2->execute([$storeId]);
         $storeName = (string)($st2->fetchColumn() ?: '');
 
-        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-        $baseUrl = $host !== '' ? ($scheme . '://' . $host) : '';
-        $link = $baseUrl . '/super/help.php?thread_id=' . urlencode((string)$threadId);
+        $link = app_public_url('/super/help.php?thread_id=' . urlencode((string)$threadId));
 
         $subject = '【シメナビ】新規お問い合わせ';
         $body = "新規お問い合わせが届きました。\n\n"

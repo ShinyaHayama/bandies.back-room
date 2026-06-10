@@ -1,6 +1,6 @@
 <?php
 $logoMain = '/images/logo_main.png?v=' . date('Ymd');
-$trialUrl = 'https://shimenavi.com/trial.php';
+$trialUrl = 'http://bandies.back-room.me/trial.php';
 ?>
 <!doctype html>
 <html lang="ja">

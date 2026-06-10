@@ -2138,7 +2138,7 @@ $tenantLabel = ($tenantName !== '')
                             h(
                                 (($bindPopup['mode'] ?? 'mypage') === 'line')
                                     ? "① 公式LINE友達登録してください。\nhttps://lin.ee/fknM0Dw\n\n② 以下を送信してください。\n" . (string)$bindPopup['code']
-                                    : "下記のマイページにアクセスしてください。\nhttps://shimenavi.com/worker/login.php\n\n下記のコードを入力するとログインできます。\n" . $tenantId . "A" . $storeId . "A" . (string)$bindPopup['code']
+                                    : "下記のマイページにアクセスしてください。\nhttp://bandies.back-room.me/worker/login.php\n\n下記のコードを入力するとログインできます。\n" . $tenantId . "A" . $storeId . "A" . (string)$bindPopup['code']
                             )
                             ?></textarea>
                         <button type="button" id="bindCopyBtn" class="btn primary" style="height:40px;">コピー</button>

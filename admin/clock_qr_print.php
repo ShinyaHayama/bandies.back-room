@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_auth.php';
+require_once __DIR__ . '/../lib/app_url.php';
 require_admin_login();
 
 $tenantId = (int)($_SESSION['tenant_id'] ?? 0);
@@ -47,11 +48,9 @@ if ($token === '') {
     exit('QR not issued');
 }
 
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$host = $_SERVER['HTTP_HOST'] ?? 'shimenavi.com';
-$qrValue = $scheme . '://' . $host . '/worker/qr_clock.php?token=' . rawurlencode($token);
+$qrValue = app_public_url('/worker/qr_clock.php?token=' . rawurlencode($token));
 $qrImgUrl = "https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=" . rawurlencode($qrValue);
-$loginUrl = $scheme . '://' . $host . '/worker/login.php';
+$loginUrl = app_public_url('/worker/login.php');
 $loginQrImgUrl = "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" . rawurlencode($loginUrl);
 
 function h(string $s): string

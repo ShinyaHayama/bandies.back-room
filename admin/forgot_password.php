@@ -14,6 +14,7 @@ session_start();
 
 require_once __DIR__ . '/../api/lib/db.php'; // あなたの構成に合わせてOK
 require_once __DIR__ . '/../lib/mailer.php';
+require_once __DIR__ . '/../lib/app_url.php';
 
 $pdo = db();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -100,9 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':ua' => $ua,
                 ]);
 
-                $baseUrl = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-                    ? ('https://' . $_SERVER['HTTP_HOST'])
-                    : ('http://' . $_SERVER['HTTP_HOST']);
+                $baseUrl = app_public_base_url();
 
                 $resetUrl = $baseUrl . '/admin/reset_password.php?tenant_id=' . urlencode((string)$tenantId)
                     . '&token=' . urlencode($rawToken);

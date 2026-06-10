@@ -4,6 +4,7 @@ declare(strict_types=1);
 session_start();
 
 require_once __DIR__ . '/lib/mailer.php';
+require_once __DIR__ . '/lib/app_url.php';
 
 date_default_timezone_set('Asia/Tokyo');
 
@@ -26,9 +27,7 @@ function base_path(): string
 
 function base_url(): string
 {
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-    return ($https ? 'https://' : 'http://') . $host;
+    return app_public_base_url();
 }
 
 function redirect_with_flash(string $msg, string $type = 'info'): void

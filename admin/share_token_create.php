@@ -13,6 +13,7 @@ require_once __DIR__ . '/_auth.php';
 require_admin_login();
 
 require_once __DIR__ . '/_tenant_context.php';
+require_once __DIR__ . '/../lib/app_url.php';
 if (!isset($tenantId) || (int)$tenantId <= 0) {
     http_response_code(401);
     echo 'tenant invalid';
@@ -101,7 +102,7 @@ $ins->execute([
     ':expires_at' => $expiresAt,
 ]);
 
-$sharePath = '/s/back_events_sp.php?token=' . urlencode($token);
+$sharePath = app_public_url('/s/back_events_sp.php?token=' . urlencode($token));
 
 echo json_encode([
     'ok' => true,

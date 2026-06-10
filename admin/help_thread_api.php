@@ -7,6 +7,7 @@ require_admin_login();
 
 require_once __DIR__ . '/_tenant_context.php'; // $tenantId
 require_once __DIR__ . '/../lib/mailer.php';
+require_once __DIR__ . '/../lib/app_url.php';
 if (!isset($tenantId) || (int)$tenantId <= 0) {
     http_response_code(400);
     header('Content-Type: application/json; charset=utf-8');
@@ -220,10 +221,7 @@ if ($action === 'create') {
             $st2->execute([$storeId]);
             $storeName = (string)($st2->fetchColumn() ?: '');
 
-            $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            $baseUrl = $host !== '' ? ($scheme . '://' . $host) : '';
-            $link = $baseUrl . '/super/help.php?thread_id=' . urlencode((string)$tid);
+            $link = app_public_url('/super/help.php?thread_id=' . urlencode((string)$tid));
 
             $subject = '【シメナビ】新規お問い合わせ';
             $body = "新規お問い合わせが届きました。\n\n"

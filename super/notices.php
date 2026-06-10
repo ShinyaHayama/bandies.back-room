@@ -7,6 +7,7 @@ require_super_admin_login();
 require_once __DIR__ . '/_db.php';
 require_once __DIR__ . '/../lib/app_notices.php';
 require_once __DIR__ . '/../lib/mailer.php';
+require_once __DIR__ . '/../lib/app_url.php';
 
 app_notices_ensure_schema($pdo);
 
@@ -26,9 +27,7 @@ function super_notice_csrf(string $csrf): void
 
 function super_notice_admin_url(): string
 {
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = (string)($_SERVER['HTTP_HOST'] ?? 'shimenavi.com');
-    return $scheme . '://' . $host . '/super/notices.php';
+    return app_public_url('/super/notices.php');
 }
 
 function super_notice_notify_created(array $notice): void
