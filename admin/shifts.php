@@ -657,13 +657,22 @@ $timelineWidth = (int)ceil($timelineTotalMin / 60) * $timelineHourWidth;
         font-size: 14px
     }
 
+    html,
+    body.shiftPage {
+        min-height: 100%;
+    }
+
     .shiftPage,
     .shiftPage * {
         font-size: 14px;
     }
 
     .page {
-        padding: 14px 24px 64px
+        min-height: calc(100vh - 72px);
+        min-height: calc(100dvh - 72px);
+        padding: 14px 24px 64px;
+        display: flex;
+        flex-direction: column;
     }
 
     .card {
@@ -875,6 +884,10 @@ $timelineWidth = (int)ceil($timelineTotalMin / 60) * $timelineHourWidth;
         border: 1px solid var(--border);
         border-radius: var(--radius);
         background: #fff;
+        flex: 1 1 auto;
+        min-height: 360px;
+        height: calc(100vh - 250px);
+        height: calc(100dvh - 250px);
     }
 
     .tableWrap::-webkit-scrollbar {
@@ -892,6 +905,12 @@ $timelineWidth = (int)ceil($timelineTotalMin / 60) * $timelineHourWidth;
         border-radius: var(--radius);
         background: #fff;
         overflow: hidden;
+        flex: 1 1 auto;
+        min-height: 360px;
+        height: calc(100vh - 250px);
+        height: calc(100dvh - 250px);
+        display: flex;
+        flex-direction: column;
     }
 
     .timelineHead {
@@ -921,6 +940,8 @@ $timelineWidth = (int)ceil($timelineTotalMin / 60) * $timelineHourWidth;
         overflow: auto;
         -ms-overflow-style: none;
         scrollbar-width: none;
+        flex: 1 1 auto;
+        min-height: 0;
     }
 
     .timelineScroll::-webkit-scrollbar {
@@ -1854,6 +1875,18 @@ $timelineWidth = (int)ceil($timelineTotalMin / 60) * $timelineHourWidth;
         border-color: #e5e7eb;
         border-radius: 999px;
         box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+    }
+
+    .shiftPage footer {
+        background: var(--bg) !important;
+        border-top-color: var(--border) !important;
+        color: var(--muted) !important;
+    }
+
+    body.adminTheme.adminHomeDark.shiftPage footer {
+        background: #080b12 !important;
+        border-top-color: rgba(148, 163, 184, .18) !important;
+        color: #64748b !important;
     }
 
     input::placeholder {

@@ -8,7 +8,7 @@ declare(strict_types=1);
  *
  * 役割:
  * - 「AIに改善案」ボタン用（JSON返却）
- * - 直近30日: 売上/人件費/率 + 定休日/入力漏れ疑い
+ * - 表示期間: 売上/人件費/率 + 定休日/入力漏れ疑い
  * - ✅ 従業員評価は time_punches（punch_type/punched_at）から確定集計
  * - ✅ shifts があれば遅刻/残業/打刻漏れ(シフト有なのにin/out不足)も集計
  * - ✅ 日跨ぎ対応（clock_in→翌日clock_out）
@@ -24,8 +24,44 @@ function out(array $a): void
     exit;
 }
 
+set_exception_handler(function (Throwable $e): void {
+    out([
+        'ok' => false,
+        'error' => 'exception',
+        'message' => $e->getMessage(),
+        'where' => basename($e->getFile()) . ':' . $e->getLine(),
+    ]);
+});
+set_error_handler(function (int $severity, string $message, string $file, int $line): bool {
+    out([
+        'ok' => false,
+        'error' => 'php_error',
+        'message' => $message,
+        'where' => basename($file) . ':' . $line,
+        'severity' => $severity,
+    ]);
+    return true;
+});
+
 require_once __DIR__ . '/_auth.php';
-require_admin_login();
+admin_session_bootstrap();
+
+if (!isset($_SESSION['admin_auth']) || (int)$_SESSION['admin_auth'] !== 1) {
+    out(['ok' => false, 'error' => 'not logged in']);
+}
+
+if (!isset($_SESSION['tenant_id'])) {
+    $_SESSION['tenant_id'] = 1;
+}
+
+$authTenantId = (int)($_SESSION['tenant_id'] ?? 0);
+if ($authTenantId > 0 && admin_is_tenant_inactive($authTenantId)) {
+    out(['ok' => false, 'error' => 'tenant inactive']);
+}
+admin_load_acl();
+if ($authTenantId > 0 && admin_is_trial_restricted($authTenantId)) {
+    out(['ok' => false, 'error' => 'trial expired']);
+}
 
 require_once __DIR__ . '/_tenant_context.php';
 if (!isset($tenantId) || (int)$tenantId <= 0) {
@@ -92,6 +128,13 @@ function has_column(PDO $pdo, string $table, string $column): bool
 function h(string $s): string
 {
     return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+}
+
+function valid_ymd_param(string $ymd): bool
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $ymd)) return false;
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $ymd);
+    return $dt instanceof DateTimeImmutable && $dt->format('Y-m-d') === $ymd;
 }
 
 function classify_punch_type(string $v): string
@@ -567,6 +610,17 @@ $now   = new DateTimeImmutable('now', new DateTimeZone($tz));
 $today = $now->format('Y-m-d');
 $from  = $now->modify('-29 days')->format('Y-m-d');
 
+$reqFrom = (string)($_GET['from'] ?? '');
+$reqTo = (string)($_GET['to'] ?? '');
+if (valid_ymd_param($reqFrom) && valid_ymd_param($reqTo)) {
+    $fromDt = new DateTimeImmutable($reqFrom, new DateTimeZone($tz));
+    $toDt = new DateTimeImmutable($reqTo, new DateTimeZone($tz));
+    if ($fromDt <= $toDt && $fromDt->diff($toDt)->days <= 62) {
+        $from = $reqFrom;
+        $today = $reqTo;
+    }
+}
+
 /* ===========================
  * stores / threshold (DB優先)
  * =========================== */
@@ -589,6 +643,7 @@ $storeIds = array_map('intval', array_column($stores, 'id'));
 if (!in_array($storeId, $storeIds, true)) $storeId = (int)$stores[0]['id'];
 
 $roundOn = ((int)($_GET['round15'] ?? 1) === 1);
+$sideCommentMode = ((string)($_GET['side_comment'] ?? '') === '1');
 
 $greenMax = 30.0;
 $yellowMax = 35.0;
@@ -630,7 +685,7 @@ if (table_exists($pdo, 'daily_store_reports') && has_column($pdo, 'daily_store_r
 $laborMap = mvp_daily_labor($pdo, $tenantId, $storeId, $from, $today, $roundOn);
 
 /* ===========================
- * 30日配列
+ * 表示期間配列
  * =========================== */
 $dates = [];
 $dt  = new DateTimeImmutable($from, new DateTimeZone($tz));
@@ -660,6 +715,9 @@ $holidayList = [];
 $missingSalesSuspectDays = 0;
 $missingSalesSuspectList = [];
 $highDays = 0;
+$weekJa = ['日', '月', '火', '水', '木', '金', '土'];
+$highWeekdayCounts = array_fill(0, 7, 0);
+$missingWeekdayCounts = array_fill(0, 7, 0);
 
 $dailyCompact = [];
 
@@ -680,6 +738,7 @@ foreach ($dates as $d) {
         } else {
             $missingSalesSuspectDays++;
             $missingSalesSuspectList[] = $d;
+            $missingWeekdayCounts[(int)(new DateTimeImmutable($d, new DateTimeZone($tz)))->format('w')]++;
         }
     } else {
         $openDays++;
@@ -688,22 +747,29 @@ foreach ($dates as $d) {
 
         $rate = ($labor / $sales * 100.0);
         $rateListOpen[] = $rate;
-        if ($rate > $yellowMax) $highDays++;
+        if ($rate > $yellowMax) {
+            $highDays++;
+            $highWeekdayCounts[(int)(new DateTimeImmutable($d, new DateTimeZone($tz)))->format('w')]++;
+        }
     }
 
+    $weekdayIndex = (int)(new DateTimeImmutable($d, new DateTimeZone($tz)))->format('w');
     $dailyCompact[] = [
         'date' => $d,
+        'weekday' => $weekJa[$weekdayIndex],
         'sales' => $sales,
         'labor' => $labor,
         'rate' => ($rate === null ? null : round($rate, 1)),
         'is_holiday' => ($sales <= 0 && $labor <= 0),
         'is_missing_sales_suspect' => ($sales <= 0 && $labor > 0),
+        'is_high_labor_rate' => ($rate !== null && $rate > $yellowMax),
         'is_open' => ($sales > 0),
     ];
 }
 
 $avgRate = ($openSalesSum > 0) ? round(($openLaborSum / $openSalesSum) * 100.0, 1) : null;
 $avgRateDaily = $rateListOpen ? round(array_sum($rateListOpen) / count($rateListOpen), 1) : null;
+$periodDays = count($dates);
 
 /* ===========================
  * ✅ 従業員集計（あなたのtime_punches仕様に対応）
@@ -732,6 +798,11 @@ $employeeSummaryJson = $workersPack['employee_summary_json'] ?? [];
  * =========================== */
 $missingListText = $missingSalesSuspectList ? implode(', ', array_slice($missingSalesSuspectList, 0, 10)) : '-';
 $holidayListText = $holidayList ? implode(', ', array_slice($holidayList, 0, 10)) : '-';
+$weekdaySummary = [];
+foreach ($weekJa as $idx => $label) {
+    $weekdaySummary[] = $label . ':注意' . (int)$highWeekdayCounts[$idx] . '日/入力漏れ疑い' . (int)$missingWeekdayCounts[$idx] . '日';
+}
+$weekdaySummaryText = implode(', ', $weekdaySummary);
 
 // workers 上位10を材料に
 // workers 上位10を材料に（AIには「〇〇時間〇〇分」で渡す）
@@ -766,7 +837,22 @@ if (($workers['status'] ?? '') === 'ok' && !empty($workers['rows'])) {
 }
 
 
-$prompt = [
+$prompt = $sideCommentMode ? [
+    "あなたは店舗の勤怠・人件費分析AIです。",
+    "下の表示期間データを見て、人件費率が高い日の傾向を短く分析してください。",
+    "必ず曜日傾向（何曜日が多いか）、売上0で人件費がある日、すぐ確認することを含めてください。",
+    "形式: 1)結論 2)曜日傾向 3)確認すべき日 4)次の打ち手。各項目は1〜2行。",
+    "",
+    "店舗: {$storeName}",
+    "期間: {$from}〜{$today}",
+    "注意基準: 人件費率 {$yellowMax}% 超",
+    "平均人件費率: " . ($avgRate === null ? "不明" : "{$avgRate}%"),
+    "注意日数: {$highDays}日",
+    "曜日集計: {$weekdaySummaryText}",
+    "売上0かつ人件費あり: {$missingSalesSuspectDays}日 / {$missingListText}",
+    "日別データ(JSON):",
+    json_encode($dailyCompact, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+] : [
     "あなたは飲食店の店長補佐AIです。",
     "読みやすさ最優先。長文禁止。専門用語禁止。",
     "",
@@ -792,7 +878,7 @@ $prompt = [
     "期間: {$from}〜{$today}",
     "打刻調整: " . ($roundOn ? "ON(15分)" : "OFF"),
     "",
-    "【集計（直近30日）】",
+    "【集計（表示期間: {$periodDays}日）】",
     "合計売上（全日）: " . number_format($sumSalesAll) . "円",
     "合計人件費（全日）: " . number_format($sumLaborAll) . "円",
     "営業日数（売上>0）: {$openDays}日",
@@ -805,7 +891,7 @@ $prompt = [
     "",
     $workerMaterial,
     "",
-    "日別(30日)データ:",
+    "日別(表示期間)データ:",
     json_encode($dailyCompact, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
     "【次アクションの表現ルール】",
     "- 次アクションでは専門用語を使わない",
@@ -869,6 +955,8 @@ out([
     'missing_sales_suspect_days' => $missingSalesSuspectDays,
     'missing_sales_suspect_list' => $missingSalesSuspectList,
     'high_days' => $highDays,
+    'weekday_summary' => $weekdaySummaryText,
+    'daily' => $dailyCompact,
 
     // ✅ 従業員（ここが今まで空だった）
     'employee_summary_period_from' => $from,

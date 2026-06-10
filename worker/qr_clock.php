@@ -32,11 +32,13 @@ if ($dbFile === null) {
 }
 require_once $dbFile;
 require_once __DIR__ . '/../lib/punch_source.php';
+require_once __DIR__ . '/../lib/punch_capture.php';
 
 $pdo = db();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 punch_source_ensure_column($pdo);
+punch_capture_ensure_columns($pdo);
 
 require_once __DIR__ . '/../admin/_business_day.php';
 
@@ -169,12 +171,9 @@ if ($rawBody !== '') {
 }
 $tokenRaw = (string)($payload['token'] ?? $_POST['token'] ?? $_GET['token'] ?? '');
 $token = extract_token($tokenRaw);
-if ($token === '') {
-    json_error('QRの内容が不正です。');
-}
 
 $storeCols = tableColumns($pdo, 'stores');
-if (!in_array('clock_qr_token', $storeCols, true)) {
+if ($token !== '' && !in_array('clock_qr_token', $storeCols, true)) {
     json_error('QR機能が未設定です。');
 }
 
@@ -187,19 +186,25 @@ $selectPrompt = $hasPromptCol ? "COALESCE(clock_qr_sales_prompt, 0) AS clock_qr_
 $selectTz = $hasTzCol ? "COALESCE(payroll_tz, 'Asia/Tokyo') AS payroll_tz" : "'Asia/Tokyo' AS payroll_tz";
 $selectCutoff = $hasCutoffCol ? "COALESCE(business_day_cutoff_time, '05:00:00') AS business_day_cutoff_time" : "'05:00:00' AS business_day_cutoff_time";
 
+$storeWhere = $token !== ''
+    ? "clock_qr_token = :token"
+    : "tenant_id = :tenant_id AND id = :store_id";
 $storeStmt = $pdo->prepare("
     SELECT id, tenant_id,
            {$selectPrompt},
            {$selectTz},
            {$selectCutoff}
     FROM stores
-    WHERE clock_qr_token = :token
+    WHERE {$storeWhere}
     LIMIT 1
 ");
-$storeStmt->execute([':token' => $token]);
+$storeParams = $token !== ''
+    ? [':token' => $token]
+    : [':tenant_id' => $tenantId, ':store_id' => $storeId];
+$storeStmt->execute($storeParams);
 $storeRow = $storeStmt->fetch();
 if (!$storeRow) {
-    json_error('QRが無効です。');
+    json_error($token !== '' ? 'QRが無効です。' : '店舗情報を確認できません。');
 }
 if ((int)$storeRow['tenant_id'] !== $tenantId || (int)$storeRow['id'] !== $storeId) {
     json_error('このQRは別店舗のため使用できません。');
@@ -237,6 +242,38 @@ if ($tpHasDeviceId && !$tpDeviceNullable && ($resolvedDeviceId === null || $reso
 
 $now = date('Y-m-d H:i:s');
 try {
+    $photoPath = null;
+    $lat = null;
+    $lng = null;
+    $accuracy = null;
+    $address = null;
+
+    if ($nextType === 'clock_in') {
+        $photoData = (string)($payload['face_photo_data'] ?? '');
+        if ($photoData === '') {
+            json_error('出勤には顔写真の撮影が必要です。');
+        }
+
+        $latRaw = $payload['latitude'] ?? null;
+        $lngRaw = $payload['longitude'] ?? null;
+        $accRaw = $payload['location_accuracy_m'] ?? $payload['accuracy'] ?? null;
+        if (!is_numeric($latRaw) || !is_numeric($lngRaw)) {
+            json_error('出勤には位置情報の取得が必要です。');
+        }
+        $lat = (float)$latRaw;
+        $lng = (float)$lngRaw;
+        $accuracy = is_numeric($accRaw) ? (float)$accRaw : null;
+        if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180) {
+            json_error('位置情報が不正です。');
+        }
+        if ($accuracy !== null && ($accuracy < 0 || $accuracy > 100000)) {
+            $accuracy = null;
+        }
+
+        $photoPath = punch_capture_save_photo_from_data_url($photoData, $tenantId, $storeId, $employeeId, $now);
+        $address = punch_capture_reverse_geocode($lat, $lng);
+    }
+
     $data = [
         'tenant_id' => $tenantId,
         'store_id' => $storeId,
@@ -250,9 +287,17 @@ try {
     if ($tpHasDeviceId) {
         $data['device_id'] = ($resolvedDeviceId !== null && $resolvedDeviceId > 0) ? $resolvedDeviceId : null;
     }
+    if ($nextType === 'clock_in') {
+        $data['punch_face_photo_path'] = $photoPath;
+        $data['punch_latitude'] = $lat;
+        $data['punch_longitude'] = $lng;
+        $data['punch_location_accuracy_m'] = $accuracy;
+        $data['punch_location_captured_at'] = $now;
+        $data['punch_location_address'] = $address;
+    }
     safeInsert($pdo, 'time_punches', $data);
 } catch (Throwable $e) {
-    json_error('打刻に失敗しました。');
+    json_error($e->getMessage() !== '' ? $e->getMessage() : '打刻に失敗しました。');
 }
 
 $promptSales = ((int)($storeRow['clock_qr_sales_prompt'] ?? 0) === 1);

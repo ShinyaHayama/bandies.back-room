@@ -9,11 +9,110 @@ declare(strict_types=1);
  * Responses API: https://api.openai.com/v1/responses :contentReference[oaicite:1]{index=1}
  */
 
+function openai_env_candidate_files(): array
+{
+    $files = [
+        dirname(__DIR__, 2) . '/.env',
+    ];
+
+    $cwd = getcwd();
+    if (is_string($cwd) && $cwd !== '') {
+        $files[] = $cwd . '/.env';
+    }
+
+    $docRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
+    if ($docRoot !== '') {
+        $files[] = rtrim($docRoot, '/\\') . '/.env';
+    }
+
+    $script = (string)($_SERVER['SCRIPT_FILENAME'] ?? '');
+    if ($script !== '') {
+        $files[] = dirname($script, 2) . '/.env';
+        $files[] = dirname($script) . '/.env';
+    }
+
+    return array_values(array_unique($files));
+}
+
+function openai_read_api_key_from_file(string $envFile): string
+{
+    if (!is_file($envFile) || !is_readable($envFile)) {
+        return '';
+    }
+
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return '';
+    }
+
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        if (!str_starts_with($line, 'OPENAI_API_KEY=')) {
+            continue;
+        }
+
+        $value = trim(substr($line, strlen('OPENAI_API_KEY=')));
+        $quote = $value[0] ?? '';
+        if (($quote === '"' || $quote === "'") && str_ends_with($value, $quote)) {
+            $value = substr($value, 1, -1);
+        }
+
+        return trim($value);
+    }
+
+    return '';
+}
+
+function openai_env_file_states(): string
+{
+    $states = [];
+    foreach (openai_env_candidate_files() as $file) {
+        if (is_file($file)) {
+            $state = is_readable($file) ? 'readable' : 'not-readable';
+        } else {
+            $state = 'missing';
+        }
+        $states[] = $file . '=' . $state;
+    }
+    return implode('; ', $states);
+}
+
+function openai_api_key_from_env(): string
+{
+    $candidates = [
+        $_ENV['OPENAI_API_KEY'] ?? '',
+        getenv('OPENAI_API_KEY') ?: '',
+        $_SERVER['OPENAI_API_KEY'] ?? '',
+    ];
+
+    foreach ($candidates as $value) {
+        $value = trim((string)$value);
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    foreach (openai_env_candidate_files() as $envFile) {
+        $value = openai_read_api_key_from_file($envFile);
+        if ($value !== '') {
+            $_ENV['OPENAI_API_KEY'] = $value;
+            $_SERVER['OPENAI_API_KEY'] = $value;
+            putenv('OPENAI_API_KEY=' . $value);
+            return $value;
+        }
+    }
+
+    return '';
+}
+
 function openai_responses(string $model, string $inputText, int $timeoutSec = 25): array
 {
-    $apiKey = $_ENV['OPENAI_API_KEY'] ?? '';
+    $apiKey = openai_api_key_from_env();
     if ($apiKey === '') {
-        throw new RuntimeException('OPENAI_API_KEY is not set');
+        throw new RuntimeException('OPENAI_API_KEY is not set (.env paths: ' . openai_env_file_states() . ')');
     }
 
     $rootDir = dirname(__DIR__, 2);

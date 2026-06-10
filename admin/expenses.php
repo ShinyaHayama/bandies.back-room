@@ -176,11 +176,12 @@ $monthlyTotal = array_sum(array_map(fn($r) => (int)$r['amount_yen'], $monthlyRow
         * { box-sizing: border-box; }
         body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Noto Sans JP", sans-serif; background: #fff; color: #111827; }
         .page { padding: 14px; padding-bottom: 64px; }
-        .wrap { max-width: 1120px; margin: 0 auto; }
-        .tabsBar { display:flex; align-items:flex-end; gap:10px; padding:10px 10px 0; background:#e9eef1; border:1px solid #e5e7eb; border-bottom:none; overflow:auto; }
-        .tabBtn { border:1px solid #d0d7de; border-bottom:none; padding:14px 28px; min-width:150px; background:#6f899b; color:#fff; font-size:14px; font-weight:900; text-decoration:none; display:inline-flex; justify-content:center; white-space:nowrap; }
-        .tabBtn.isActive { background:#fff; color:#0f172a; }
-        .tabWrap { border:1px solid #e5e7eb; padding:14px; }
+        .wrap { max-width: none; margin: 0; }
+        .tabsBar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:0; margin-bottom:16px; background:transparent; border:none; overflow:visible; }
+        .tabBtn { appearance:none; min-height:44px; border:1px solid #d0d7de; border-radius:999px; padding:0 18px; min-width:132px; background:#fff; color:#0f172a; font-family:system-ui,-apple-system,sans-serif; font-size:13px; font-weight:900; line-height:1; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; cursor:pointer; transition:background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+        .tabBtn.isActive { background:linear-gradient(135deg, #365EAB, #4b74c2); color:#fff; border-color:rgba(54, 94, 171, .32); box-shadow:0 10px 24px rgba(54, 94, 171, .18); }
+        .tabBtn:focus { outline:2px solid rgba(111, 137, 155, .35); outline-offset:2px; }
+        .tabWrap { border:1px solid #e5e7eb; padding:14px; border-radius:16px; }
         .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
         .box { border:1px solid #e5e7eb; background:#fff; padding:14px; border-radius:12px; }
         .boxHead { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
@@ -213,7 +214,7 @@ $monthlyTotal = array_sum(array_map(fn($r) => (int)$r['amount_yen'], $monthlyRow
         @media (max-width: 860px) {
             .grid { grid-template-columns:1fr; }
             .rowForm, .monthlyRow { grid-template-columns:1fr; align-items:stretch; }
-            .tabBtn { min-width:120px; padding:12px 18px; }
+            .tabBtn { min-width:120px; min-height:40px; padding:0 14px; }
         }
     </style>
 </head>
@@ -224,12 +225,15 @@ $monthlyTotal = array_sum(array_map(fn($r) => (int)$r['amount_yen'], $monthlyRow
             <?php if ($message): ?><div class="notice"><?= h($message) ?></div><?php endif; ?>
             <?php if ($error): ?><div class="notice err"><?= h($error) ?></div><?php endif; ?>
 
-            <div class="tabsBar" role="tablist" aria-label="設定タブ">
+            <div class="tabsBar" role="tablist" aria-label="設定">
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#list">従業員設定</a>
+                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#add">従業員追加</a>
                 <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#payroll">店舗設定</a>
-                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費率設定</a>
+                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#store">店舗追加</a>
+                <a class="tabBtn" href="/admin/employees_new.php?store_id=<?= (int)$storeId ?>#labor">人件費設定</a>
                 <a class="tabBtn isActive" href="/admin/expenses.php?store_id=<?= (int)$storeId ?>&month=<?= h($month) ?>">経費</a>
                 <a class="tabBtn" href="/admin/devices_manage.php?store_id=<?= (int)$storeId ?>">端末管理</a>
+                <a class="tabBtn" href="/admin/color_settings.php?store_id=<?= (int)$storeId ?>">テーマ変更</a>
             </div>
 
             <div class="tabWrap">
